@@ -1,0 +1,9 @@
+node_modules/
+# secretos reales de cada ambiente (sólo se versionan los *.env.example)
+env/*.env
+.env
+*.pem
+reportes/
+coverage/
+*.log
+.DS_Store

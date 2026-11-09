@@ -1,0 +1,16 @@
+# AMBIENTE DE DESARROLLO — recarga automática, base de datos accesible desde el equipo (puerto 5432 sólo en localhost).
+services:
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  app:
+    build:
+      target: desarrollo
+    ports:
+      - "3000:3000"
+    volumes:
+      # el código se monta como volumen: al guardar un archivo, nodemon reinicia la app
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./db:/app/db

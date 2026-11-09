@@ -1,0 +1,49 @@
+# Definición común a los tres ambientes. No se usa sola: se combina con un archivo de ambiente, p. ej.
+#   docker compose -p pnk-dev  --env-file env/dev.env  -f docker-compose.yml -f docker-compose.dev.yml  up --build
+#   docker compose -p pnk-qa   --env-file env/qa.env   -f docker-compose.yml -f docker-compose.qa.yml   up --build
+#   docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+# (o con los atajos: npm run docker:dev | docker:qa | docker:prod)
+# Cada ambiente usa un nombre de proyecto distinto (-p), por lo que tiene su propia red y su propio volumen de datos.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:?Defina DB_NAME en el archivo env del ambiente}
+      POSTGRES_USER: ${DB_USER:?Defina DB_USER en el archivo env del ambiente}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD en el archivo env del ambiente}
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  app:
+    build:
+      context: .
+      target: produccion
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:?Defina APP_ENV (development | qa | production)}
+      PORT: "3000"
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      SESSION_SECRET: ${SESSION_SECRET:?Defina SESSION_SECRET (mínimo 32 caracteres en qa y production)}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      SEED_CATALOGO: ${SEED_CATALOGO:-false}
+      SEED_USUARIOS_DEMO: ${SEED_USUARIOS_DEMO:-false}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+
+volumes:
+  dbdata:

@@ -1,0 +1,13 @@
+* text=auto
+# los scripts de shell deben conservar saltos de línea LF para ejecutarse dentro de contenedores Linux
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.sql text eol=lf
+# binarios
+*.png binary
+*.jpg binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
