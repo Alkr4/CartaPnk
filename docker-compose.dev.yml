@@ -2,13 +2,13 @@
 services:
   db:
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${DB_HOST_PORT:-5432}:5432"
 
   app:
     build:
       target: desarrollo
     ports:
-      - "3000:3000"
+      - "${APP_PORT:-3000}:3000" # cambie APP_PORT en env/dev.env si 3000 está ocupado (p. ej. por producción en el mismo servidor)
     volumes:
       # el código se monta como volumen: al guardar un archivo, nodemon reinicia la app
       - ./src:/app/src

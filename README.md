@@ -110,4 +110,5 @@ el contenedor (`docker/entrypoint.sh`).
 ## Documentación adicional
 
 - [`docs/PUBLICACION.md`](docs/PUBLICACION.md) — publicar en **Git, AWS y Cloudflare** paso a paso.
+- [`docs/DEMO-AMBIENTES.md`](docs/DEMO-AMBIENTES.md) — cómo mostrar los tres ambientes funcionando a la vez (con túneles temporales de Cloudflare) y tabla de diferencias.
 - [`docs/JENKINS.md`](docs/JENKINS.md) — plan de CI/CD con Jenkins y plugins de seguridad (OWASP / MITRE) para la 4.ª entrega; incluye un [`Jenkinsfile`](Jenkinsfile) borrador.
