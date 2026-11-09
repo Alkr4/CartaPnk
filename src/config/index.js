@@ -69,6 +69,13 @@ const config = {
     duracionMs: entero('SESSION_HORAS', 8) * 60 * 60 * 1000,
     duracionAdminMs: entero('ADMIN_SESION_HORAS', 2) * 60 * 60 * 1000, // el panel de administración expira antes
   },
+  // Imágenes subidas desde el panel. local = disco (un servidor); s3 = bucket de Amazon S3 (varias instancias).
+  almacenamiento: {
+    driver: process.env.STORAGE_DRIVER === 's3' ? 's3' : 'local',
+    directorio: process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads'),
+    bucket: process.env.S3_BUCKET || '',
+    region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1',
+  },
   seguridad: {
     hsts: booleano('ENABLE_HSTS', ambiente === 'production'),
     loginMaxIntentos: entero('LOGIN_MAX_INTENTOS', 5),
@@ -78,5 +85,9 @@ const config = {
   },
   logs: process.env.LOG_FORMAT || (ambiente === 'development' ? 'dev' : 'combined'),
 };
+
+if (config.almacenamiento.driver === 's3' && !config.almacenamiento.bucket) {
+  throw new Error('STORAGE_DRIVER=s3 requiere S3_BUCKET');
+}
 
 module.exports = config;
