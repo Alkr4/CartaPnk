@@ -30,14 +30,8 @@ const limiteLogin = () => rateLimit({
   handler: (req, res) => {
     req.session.flash = 'Demasiados intentos fallidos. Inténtalo nuevamente en unos minutos.';
     res.set('Retry-After', String(Math.ceil(config.seguridad.loginVentanaMs / 1000)));
-    res.redirect(303, volverA(req));
+    res.redirect(303, '/admin/login');
   },
 });
 
-/** Destino seguro tras login/logout: sólo rutas internas /restaurantes/:id (evita redirecciones abiertas). */
-function volverA(req) {
-  const id = /^[1-9]\d{0,9}$/.test(String(req.body?.restaurante ?? '')) ? req.body.restaurante : null;
-  return id ? `/restaurantes/${id}` : '/';
-}
-
-module.exports = { limiteGlobal, limiteLogin, volverA };
+module.exports = { limiteGlobal, limiteLogin };

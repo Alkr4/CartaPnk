@@ -67,6 +67,7 @@ const config = {
     // Secure sólo cuando el sitio se sirve por HTTPS (producción detrás de Cloudflare). En QA local por HTTP debe ser false.
     cookieSecure: booleano('COOKIE_SECURE', ambiente === 'production'),
     duracionMs: entero('SESSION_HORAS', 8) * 60 * 60 * 1000,
+    duracionAdminMs: entero('ADMIN_SESION_HORAS', 2) * 60 * 60 * 1000, // el panel de administración expira antes
   },
   seguridad: {
     hsts: booleano('ENABLE_HSTS', ambiente === 'production'),

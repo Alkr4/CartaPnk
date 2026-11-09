@@ -196,20 +196,6 @@
         <div class="col-lg-12">
           <div class="section-intro">
             <h4 class="intro-title">Comentarios</h4>
-            <% if (locals.usuario) { %>
-             <form action="/restaurantes/<%= restaurante.id %>/comentarios" method="post">
-              <input type="hidden" name="_csrf" value="<%= locals.csrfToken || '' %>">
-              <div class="mb-3">
-                <label for="usuario">Nombre:</label>
-                <input type="text" class="form-control" id="usuario" value="<%= usuario.nombre %>" readonly>
-              </div>
-              <div class="mb-3">
-                <label for="comentario">Comentario:</label>
-                <textarea class="form-control" rows="5" id="comentario" name="comentario" maxlength="1000" required></textarea>
-              </div>
-              <button type="submit" class="btn btn-success fa-align-right">Comentar</button>
-           </form>
-           <% } %>
           </div>
           <br>
           <% for (const c of comentarios) { %>

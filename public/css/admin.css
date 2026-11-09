@@ -1,0 +1,12 @@
+/* Estilos del panel de administración (el sitio público conserva su estilo original) */
+body.admin { background: #f4f5f7; padding-bottom: 60px; }
+.admin-main { padding-top: 24px; }
+.login-card { margin-top: 12vh; }
+.admin h1, .admin h2 { color: #1f2a44; }
+.admin .table th { white-space: nowrap; }
+.admin .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #e9ecef; }
+.admin .thumb-lg { width: 140px; height: 140px; object-fit: cover; border-radius: 8px; background: #e9ecef; }
+.admin .card + .card { margin-top: 16px; }
+.admin .tree-level-1 { margin-left: 18px; border-left: 3px solid #dee2e6; padding-left: 14px; }
+.admin .tree-level-2 { margin-left: 18px; border-left: 3px solid #ced4da; padding-left: 14px; }
+.admin .badge-estado { font-weight: 500; }
