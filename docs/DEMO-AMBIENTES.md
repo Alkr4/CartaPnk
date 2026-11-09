@@ -59,7 +59,7 @@ Cada línea imprime la URL pública de ese ambiente. Las direcciones cambian si 
    En **producción** ese usuario **no existe** (sólo el administrador definido en `env/prod.env`).
 4. **Infraestructura como código**: abrir en GitHub `docker-compose.yml` + `docker-compose.dev.yml` / `.qa.yml` / `.prod.yml`
    y las plantillas `env/*.env.example` (los secretos reales no están en el repositorio).
-5. **QA automatizado**: mostrar la salida de `docker compose -p pnk-qa … up --build --abort-on-container-exit --exit-code-from pruebas`
+5. **QA automatizado**: mostrar la salida de `docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up --build --abort-on-container-exit --exit-code-from pruebas`
    con `62 passed`, lint sin advertencias y `found 0 vulnerabilities`.
 6. **Pipeline (4.ª entrega)**: `docs/JENKINS.md` y el `Jenkinsfile`.
 
