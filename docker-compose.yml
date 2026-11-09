@@ -44,6 +44,12 @@ services:
       SEED_USUARIOS_DEMO: ${SEED_USUARIOS_DEMO:-false}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      S3_BUCKET: ${S3_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    volumes:
+      - uploads:/app/uploads # imágenes del panel (driver local); persisten entre reinicios
 
 volumes:
   dbdata:
+  uploads:

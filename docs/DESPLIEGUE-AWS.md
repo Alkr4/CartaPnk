@@ -19,11 +19,12 @@ Todo se crea con **CloudFormation** (`infra/pnk-stack.yaml`) y se orquesta con *
 | **RDS PostgreSQL 17** | `db.t3.micro`, 20 GB gp3 cifrado, **no es accesible desde Internet**: su grupo de seguridad sólo acepta tráfico de las instancias de la app |
 | **ALB** | recibe HTTP :80, comprueba `/salud` cada 15 s y saca del servicio a la instancia que no responde |
 | **Auto Scaling Group** | mínimo 2, máximo 4 instancias; escala por **peticiones por instancia** (> 300/min) y por **CPU** (> 55 %); reemplaza instancias enfermas; actualiza imágenes con *rolling update* |
+| **S3** | bucket **privado** (cifrado, sin acceso público, sólo HTTPS) con las imágenes que el administrador sube desde `/admin`; lo comparten todas las instancias |
 | **ECR** | repositorio `cartapnk` con la imagen Docker (la crea el script) |
 
 Cadena de grupos de seguridad: `Internet → ALB (80) → app (3000, sólo desde el ALB) → RDS (5432, sólo desde la app)`.
 
-Las instancias no guardan estado: **sesiones, carrito y contadores del límite de login viven en PostgreSQL**, por eso se puede añadir o quitar instancias sin que nadie pierda su sesión.
+Las instancias no guardan estado: **sesiones, carrito y contadores del límite de login viven en PostgreSQL y las imágenes en S3**, por eso se puede añadir o quitar instancias sin que nadie pierda su sesión.
 
 > **Costo:** mientras exista, la infraestructura consume crédito del laboratorio (2 × EC2, RDS, ALB; del orden de unos pocos dólares por día — verifique con la calculadora de precios de AWS). **Destrúyala al terminar** (`down`).
 > **Tiempo:** la primera creación tarda ~10-15 minutos (RDS es lo más lento).
@@ -185,6 +186,7 @@ Tarda ~10 minutos. **Elimina la base de datos y sus datos.**
 - Cadena de grupos de seguridad de mínimo privilegio (la app sólo acepta al ALB; la base sólo a la app).
 - Sin credenciales en el código ni en Git: secretos generados al desplegar; `.despliegue/` está en `.gitignore`.
 - Contenedor de solo lectura, `cap_drop: ALL`, `no-new-privileges`, IMDSv2 obligatorio.
+- Imágenes en un bucket S3 **privado** (Block Public Access, SSE-AES256, política que exige HTTPS); la app las sirve por `/media` con `nosniff` y CSP `sandbox`; credenciales por rol de instancia (IMDSv2, sin claves en el código).
 - Límite de intentos de login **global** (PostgreSQL), sesiones y carrito en base de datos.
 
 **Límites conocidos (laboratorio) y cómo mejorarlos**
@@ -192,5 +194,6 @@ Tarda ~10 minutos. **Elimina la base de datos y sus datos.**
 - Las instancias están en subredes públicas (para descargar imágenes sin NAT Gateway) aunque sólo aceptan tráfico del ALB.
 - Los secretos viajan en el `user-data` de la plantilla de lanzamiento; en producción real usar **AWS Secrets Manager** (`ManageMasterUserPassword`) y un rol de instancia que los lea.
 - RDS sin Multi-AZ y sin copias de seguridad automáticas (`BackupRetentionPeriod: 0`): sólo para laboratorio.
+- El rol `LabRole` de AWS Academy es amplio; en una cuenta real se usaría un rol con permiso `s3:GetObject/PutObject/DeleteObject` sólo sobre este bucket.
 - Sin WAF de AWS; con dominio, el WAF de Cloudflare cumple ese papel.
 - No se ha validado en un Learner Lab real desde este repositorio: la plantilla pasa `cfn-lint` y el script se probó con AWS simulado; el primer despliegue real puede requerir ajustes menores (ver la tabla anterior).

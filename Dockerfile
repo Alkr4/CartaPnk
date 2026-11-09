@@ -56,7 +56,8 @@ COPY docker/entrypoint.sh ./docker/entrypoint.sh
 RUN mkdir -p db/certs \
  && wget -qO db/certs/rds-global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
  && test -s db/certs/rds-global-bundle.pem
-RUN chmod +x docker/entrypoint.sh && chown -R node:node /app
+# /app/uploads: imágenes subidas desde el panel con STORAGE_DRIVER=local (en AWS se usa S3 y no se escribe a disco)
+RUN mkdir -p uploads && chmod +x docker/entrypoint.sh && chown -R node:node /app
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

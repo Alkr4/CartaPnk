@@ -317,6 +317,38 @@ Resources:
       DefaultActions:
         - { Type: forward, TargetGroupArn: !Ref TargetGroup }
 
+  # ---------------------------------------------------------------- Imágenes subidas desde el panel (Amazon S3)
+  # Bucket PRIVADO: nadie accede por URL de S3; la aplicación lee/escribe con el rol de la instancia y sirve las imágenes en /media.
+  # Es compartido por todas las instancias del Auto Scaling (el disco de cada una es distinto y se pierde al reemplazarla).
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete          # entorno de laboratorio: al destruir la pila se elimina (vacíelo antes: desplegar.sh down lo hace)
+    UpdateReplacePolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+
+  MediaBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MediaBucket
+      PolicyDocument:
+        Statement:
+          - Sid: SoloHttps
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt MediaBucket.Arn, !Sub "${MediaBucket.Arn}/*"]
+            Condition: { Bool: { "aws:SecureTransport": "false" } }
+
   # ---------------------------------------------------------------- Instancias (plantilla de lanzamiento + Auto Scaling)
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
@@ -327,7 +359,8 @@ Resources:
         InstanceType: !Ref InstanceType
         IamInstanceProfile: { Name: !Ref InstanceProfileName }
         SecurityGroupIds: [!Ref AppSecurityGroup]
-        MetadataOptions: { HttpTokens: required, HttpEndpoint: enabled }
+        # IMDSv2 obligatorio; hop limit 2 para que el CONTENEDOR (un salto de red más) obtenga las credenciales del rol (acceso a S3)
+        MetadataOptions: { HttpTokens: required, HttpEndpoint: enabled, HttpPutResponseHopLimit: 2 }
         TagSpecifications:
           - ResourceType: instance
             Tags: [{ Key: Name, Value: cartapnk-app }]
@@ -359,6 +392,9 @@ Resources:
                 SEED_CATALOGO=${SeedCatalogo}
                 ADMIN_EMAIL=${AdminEmail}
                 ADMIN_PASSWORD=${AdminPassword}
+                STORAGE_DRIVER=s3
+                S3_BUCKET=${MediaBucket}
+                AWS_REGION=${AWS::Region}
                 ENV
                 umask 022
 
@@ -430,6 +466,9 @@ Outputs:
   DatabaseEndpoint:
     Description: Endpoint de RDS (sólo accesible desde dentro de la VPC)
     Value: !GetAtt Database.Endpoint.Address
+  MediaBucketName:
+    Description: Bucket S3 (privado) con las imágenes subidas desde el panel de administración
+    Value: !Ref MediaBucket
   AutoScalingGroupName:
     Value: !Ref AutoScalingGroup
   TargetGroupArn:

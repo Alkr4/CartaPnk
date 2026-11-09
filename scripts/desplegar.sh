@@ -85,6 +85,7 @@ cmd_verificar() {
   sonda "ELB: Application Load Balancer"           aws elbv2 describe-load-balancers --query 'length(LoadBalancers)' --output text
   sonda "Auto Scaling: grupos"                      aws autoscaling describe-auto-scaling-groups --query 'length(AutoScalingGroups)' --output text
   sonda "ECR: repositorios"                         aws ecr describe-repositories --query 'length(repositories)' --output text
+  sonda "S3: listar buckets (imágenes del panel)"   aws s3api list-buckets --query 'length(Buckets)' --output text
   sonda "CloudFormation: pilas"                     aws cloudformation list-stacks --max-items 1
   if aws acm list-certificates --max-items 1 >/dev/null 2>&1; then ok "ACM: certificados disponibles (necesario sólo para HTTPS con dominio propio)"; else aviso "ACM no disponible en esta cuenta: con dominio use el modo 'Flexible' de Cloudflare (ver docs/DOMINIO-CLOUDFLARE.md)"; fi
   sonda "SSM: AMI de Amazon Linux 2023"             aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --query Parameter.Value --output text
@@ -226,6 +227,7 @@ resumen() {
   printf '   URL (HTTP):   %s\n' "${url}"
   printf '   Salud:        %s/salud\n' "${url}"
   printf '   Base de datos: RDS PostgreSQL (privada): %s\n' "$(salida_pila DatabaseEndpoint)"
+  printf '   Panel admin:  %s/admin   (imágenes en S3: %s)\n' "${url}" "$(salida_pila MediaBucketName)"
   printf '   Administrador: %s\n' "${ADMIN_EMAIL}"
   if [ "${SECRETOS_NUEVOS:-0}" = "1" ]; then
     printf '   Contraseña:    %s   (se muestra SOLO ahora; queda también en %s)\n' "${ADMIN_PASSWORD}" "${SECRETOS}"
@@ -352,6 +354,12 @@ cmd_down() {
   if [ "$(estado_pila)" = "NO_EXISTE" ]; then
     ok "la pila no existe (nada que borrar)"
   else
+    # CloudFormation no puede borrar un bucket con objetos: se vacía primero (las imágenes subidas se pierden)
+    local bucket
+    bucket="$(salida_pila MediaBucketName || true)"
+    if [ -n "${bucket}" ] && [ "${bucket}" != "None" ]; then
+      aws s3 rm "s3://${bucket}" --recursive >/dev/null 2>&1 && ok "bucket S3 '${bucket}' vaciado" || aviso "no se pudo vaciar el bucket '${bucket}' (¿ya estaba vacío?)"
+    fi
     aws cloudformation delete-stack --stack-name "${STACK}"
     aviso "Eliminando… tarda ~10 minutos (RDS)."
     aws cloudformation wait stack-delete-complete --stack-name "${STACK}"
