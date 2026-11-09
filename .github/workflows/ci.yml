@@ -1,0 +1,58 @@
+# Integración continua en GitHub: se ejecuta en cada push y Pull Request hacia develop o main.
+# El trabajo "calidad" es el chequeo que se marca como obligatorio en la protección de la rama main.
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  calidad:
+    name: calidad
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: pnk_test
+          POSTGRES_USER: pnk
+          POSTGRES_PASSWORD: pnk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pnk -d pnk_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      APP_ENV: test
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: pnk_test
+      DB_USER: pnk
+      DB_PASSWORD: pnk
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint (ESLint + eslint-plugin-security)
+        run: npm run lint
+
+      - name: Pruebas (Jest + Supertest)
+        run: npm test
+
+      - name: Auditoría de dependencias de producción
+        run: npm run audit:deps
