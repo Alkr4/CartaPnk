@@ -1,0 +1,16 @@
+# Reglas de OWASP ZAP para el escaneo baseline del pipeline (zap-baseline.py -c).
+# Formato: <id de la regla> <TAB> <IGNORE|INFO|WARN|FAIL> <TAB> <comentario>
+# Las reglas 40012, 40014 y 40018 son de escaneo ACTIVO: sólo se evalúan con zap-full-scan.py (no con baseline).
+# FAIL rompe el build; WARN sólo informa; IGNORE oculta (se usa para lo que no aplica en QA por HTTP).
+10010	FAIL	Cookie sin HttpOnly (VUL-10)
+10054	FAIL	Cookie sin SameSite (VUL-10)
+10020	FAIL	Falta protección anti-clickjacking (VUL-11)
+10021	FAIL	Falta X-Content-Type-Options (VUL-11)
+10038	FAIL	Falta Content-Security-Policy (VUL-11)
+10037	FAIL	Cabecera que revela la tecnología del servidor (VUL-12)
+10036	FAIL	Cabecera Server con versión (VUL-12)
+40012	FAIL	XSS reflejado (VUL-06/07)
+40014	FAIL	XSS persistente (VUL-08)
+40018	FAIL	Inyección SQL (VUL-03/04/05)
+10011	IGNORE	Cookie sin Secure: QA se prueba por HTTP; en producción Cloudflare sirve HTTPS
+10035	IGNORE	HSTS: sólo se envía en producción (HTTPS)

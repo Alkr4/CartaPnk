@@ -1,0 +1,23 @@
+{
+  "_nota": "Mapeo CWE -> CAPEC -> MITRE ATT&CK propuesto para el pipeline. Es una guía de trabajo: valide cada fila contra https://cwe.mitre.org, https://capec.mitre.org y https://attack.mitre.org antes de citarla en un informe.",
+  "CWE-89":   { "nombre": "Inyección SQL", "capec": ["CAPEC-66"], "attack": ["T1190 Exploit Public-Facing Application"] },
+  "CWE-79":   { "nombre": "Cross-Site Scripting (XSS)", "capec": ["CAPEC-63"], "attack": ["T1059.007 JavaScript", "T1189 Drive-by Compromise"] },
+  "CWE-352":  { "nombre": "Cross-Site Request Forgery (CSRF)", "capec": ["CAPEC-62"], "attack": [] },
+  "CWE-307":  { "nombre": "Intentos de autenticación sin restricción", "capec": ["CAPEC-49"], "attack": ["T1110 Brute Force"] },
+  "CWE-798":  { "nombre": "Credenciales embebidas en el código", "capec": ["CAPEC-191"], "attack": ["T1552.001 Credentials In Files"] },
+  "CWE-256":  { "nombre": "Contraseña en texto plano", "capec": [], "attack": ["T1552 Unsecured Credentials"] },
+  "CWE-312":  { "nombre": "Dato sensible sin cifrar", "capec": [], "attack": ["T1552 Unsecured Credentials"] },
+  "CWE-916":  { "nombre": "Hash de contraseña débil", "capec": ["CAPEC-55"], "attack": ["T1110.002 Password Cracking"] },
+  "CWE-384":  { "nombre": "Fijación de sesión", "capec": ["CAPEC-61"], "attack": ["T1550.004 Web Session Cookie"] },
+  "CWE-1004": { "nombre": "Cookie sin HttpOnly", "capec": [], "attack": ["T1539 Steal Web Session Cookie"] },
+  "CWE-614":  { "nombre": "Cookie sin atributo Secure", "capec": [], "attack": ["T1557 Adversary-in-the-Middle"] },
+  "CWE-1275": { "nombre": "Cookie sin SameSite", "capec": ["CAPEC-62"], "attack": [] },
+  "CWE-693":  { "nombre": "Mecanismo de protección ausente (cabeceras de seguridad)", "capec": [], "attack": [] },
+  "CWE-1021": { "nombre": "Clickjacking (restricción de marcos incorrecta)", "capec": ["CAPEC-103"], "attack": [] },
+  "CWE-200":  { "nombre": "Exposición de información", "capec": ["CAPEC-118"], "attack": ["T1592 Gather Victim Host Information"] },
+  "CWE-209":  { "nombre": "Mensajes de error con información sensible", "capec": ["CAPEC-215"], "attack": ["T1592 Gather Victim Host Information"] },
+  "CWE-538":  { "nombre": "Archivo sensible expuesto", "capec": ["CAPEC-639"], "attack": ["T1190 Exploit Public-Facing Application"] },
+  "CWE-22":   { "nombre": "Path traversal", "capec": ["CAPEC-126"], "attack": ["T1190 Exploit Public-Facing Application"] },
+  "CWE-1104": { "nombre": "Componente de terceros sin mantenimiento", "capec": [], "attack": ["T1195.001 Compromise Software Dependencies and Development Tools"] },
+  "CWE-1395": { "nombre": "Dependencia con vulnerabilidad conocida", "capec": [], "attack": ["T1195.001 Compromise Software Dependencies and Development Tools"] }
+}
