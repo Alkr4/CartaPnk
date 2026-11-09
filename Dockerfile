@@ -12,15 +12,16 @@ WORKDIR /app
 RUN apk add --no-cache tini
 
 # ---------------------------------------------------------------- dependencias
+# npm acotado en memoria (--max-old-space-size) y sin auditoría/anuncios: el build debe poder correr en servidores de 1 GB de RAM
 FROM base AS deps-produccion
-ENV NODE_ENV=production
+ENV NODE_ENV=production \n    NODE_OPTIONS=--max-old-space-size=384
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
 FROM base AS deps-completas
-ENV NODE_ENV=development
+ENV NODE_ENV=development \n    NODE_OPTIONS=--max-old-space-size=384
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 
 # ---------------------------------------------------------------- DESARROLLO
 FROM deps-completas AS desarrollo
