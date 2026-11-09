@@ -37,7 +37,9 @@ services:
     restart: unless-stopped
     command: tunnel --no-autoupdate run
     environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Defina TUNNEL_TOKEN (Cloudflare Zero Trust > Networks > Tunnels)}
+      # Compose interpola las variables aunque el perfil no esté activo, por eso no puede ser ":?" (obligatoria).
+      # Sin token, cloudflared falla al arrancar con un mensaje claro: complételo en env/prod.env antes de usar --profile tunnel.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
     depends_on:
       - app
     security_opt:
