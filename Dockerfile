@@ -52,6 +52,10 @@ COPY src ./src
 COPY db ./db
 COPY public ./public
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
+# Certificado raíz de Amazon RDS (para conectarse con TLS verificado: DB_SSL=true). Si la descarga falla, el build falla.
+RUN mkdir -p db/certs \
+ && wget -qO db/certs/rds-global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+ && test -s db/certs/rds-global-bundle.pem
 RUN chmod +x docker/entrypoint.sh && chown -R node:node /app
 USER node
 EXPOSE 3000

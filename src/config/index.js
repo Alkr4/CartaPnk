@@ -7,6 +7,8 @@
  *   qa          — pruebas de calidad: se comporta como producción (sin valores por defecto para secretos).
  *   production  — producción: secretos obligatorios, cookies Secure, HSTS.
  */
+const path = require('node:path');
+
 const AMBIENTES = ['development', 'test', 'qa', 'production'];
 
 const ambiente = process.env.APP_ENV || (process.env.NODE_ENV === 'production' ? 'production' : 'development');
@@ -55,6 +57,9 @@ const config = {
     user: obligatoria('DB_USER', 'pnk'),
     password: obligatoria('DB_PASSWORD', 'pnk'),
     max: entero('DB_POOL_MAX', 10),
+    // Conexión cifrada y verificada (obligatoria con Amazon RDS: DB_SSL=true). El certificado raíz de AWS se descarga al construir la imagen.
+    ssl: booleano('DB_SSL', false),
+    sslCa: process.env.DB_SSL_CA || path.join(__dirname, '..', '..', 'db', 'certs', 'rds-global-bundle.pem'),
   },
   sesion: {
     secreto: secretoSesion,

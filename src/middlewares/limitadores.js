@@ -1,6 +1,7 @@
 'use strict';
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const config = require('../config');
+const { AlmacenLimitePostgres } = require('./almacenLimitePostgres');
 
 /** Límite general por IP contra abuso/DoS básico. */
 const limiteGlobal = () => rateLimit({
@@ -14,12 +15,13 @@ const limiteGlobal = () => rateLimit({
 /**
  * Fuerza bruta en el login: máximo N intentos FALLIDOS por IP + correo en la ventana (por defecto 5 en 15 min).
  * Los inicios de sesión correctos no cuentan. Al superar el límite se redirige con un mensaje genérico.
- * (Almacenamiento en memoria: válido para una réplica; con varias réplicas usar un store compartido, p. ej. Redis.)
+ * El contador vive en PostgreSQL, así que el límite es global aunque haya varias instancias (Auto Scaling).
  */
 const limiteLogin = () => rateLimit({
   windowMs: config.seguridad.loginVentanaMs,
   limit: config.seguridad.loginMaxIntentos,
   skipSuccessfulRequests: true,
+  store: new AlmacenLimitePostgres('login:'), // contador GLOBAL (varias instancias detrás del balanceador)
   // un login fallido también responde con redirección (<400): sólo cuenta como "exitoso" si el controlador lo marca
   requestWasSuccessful: (req, res) => res.locals.loginExitoso === true,
   standardHeaders: 'draft-7',
