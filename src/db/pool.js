@@ -33,4 +33,20 @@ pool.on('error', (err) => {
 /** Consulta parametrizada: los valores viajan separados del SQL ($1, $2…), nunca concatenados. */
 const query = (texto, parametros = []) => pool.query(texto, parametros);
 
-module.exports = { pool, query };
+/** Ejecuta `fn(cliente)` dentro de una transacción: COMMIT si termina bien, ROLLBACK si lanza un error. */
+async function transaccion(fn) {
+  const cliente = await pool.connect();
+  try {
+    await cliente.query('BEGIN');
+    const resultado = await fn(cliente);
+    await cliente.query('COMMIT');
+    return resultado;
+  } catch (err) {
+    await cliente.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    cliente.release();
+  }
+}
+
+module.exports = { pool, query, transaccion };

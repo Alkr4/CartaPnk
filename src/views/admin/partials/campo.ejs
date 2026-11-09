@@ -1,0 +1,12 @@
+<%# Campo de formulario: nombre, etiqueta, tipo (text|number|email|textarea), valores, errores, requerido, max, col %>
+<% const v = (valores && valores[nombre] != null) ? valores[nombre] : ''; %>
+<div class="mb-3 <%= locals.col || '' %>">
+  <label class="form-label" for="f-<%= nombre %>"><%= etiqueta %><%= locals.requerido ? ' *' : '' %></label>
+  <% if (locals.tipo === 'textarea') { %>
+    <textarea class="form-control<%= errores[nombre] ? ' is-invalid' : '' %>" id="f-<%= nombre %>" name="<%= nombre %>" rows="3" maxlength="<%= locals.max || 300 %>"><%= v %></textarea>
+  <% } else { %>
+    <input class="form-control<%= errores[nombre] ? ' is-invalid' : '' %>" id="f-<%= nombre %>" name="<%= nombre %>" type="<%= locals.tipo || 'text' %>"
+           value="<%= v %>" <% if (locals.max) { %>maxlength="<%= max %>"<% } %> <%= locals.requerido ? 'required' : '' %>>
+  <% } %>
+  <% if (errores[nombre]) { %><div class="invalid-feedback"><%= errores[nombre] %></div><% } %>
+</div>

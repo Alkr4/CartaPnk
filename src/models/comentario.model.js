@@ -13,12 +13,28 @@ async function listarPorRestaurante(restauranteId) {
   return rows;
 }
 
-/** El autor es siempre un usuario autenticado (usuario_id), nunca un nombre enviado por el cliente. */
-async function crear({ usuarioId, restauranteId, comentario }) {
-  await query(
-    'INSERT INTO comentarios (usuario_id, restaurante_id, comentario) VALUES ($1, $2, $3)',
-    [usuarioId, restauranteId, comentario],
+// ------------------------------------------------------------------ administración (moderación)
+
+async function listarAdmin(restauranteId) {
+  const { rows } = await query(
+    `SELECT c.id, u.nombre AS usuario, c.comentario, c.creado
+       FROM comentarios c
+       JOIN usuarios u ON u.id = c.usuario_id
+      WHERE c.restaurante_id = $1
+      ORDER BY c.id DESC`,
+    [restauranteId],
   );
+  return rows;
 }
 
-module.exports = { listarPorRestaurante, crear };
+async function obtener(id) {
+  const { rows } = await query('SELECT id, restaurante_id FROM comentarios WHERE id = $1', [id]);
+  return rows[0] ?? null;
+}
+
+async function eliminar(id) {
+  const { rowCount } = await query('DELETE FROM comentarios WHERE id = $1', [id]);
+  return rowCount > 0;
+}
+
+module.exports = { listarPorRestaurante, listarAdmin, obtener, eliminar };

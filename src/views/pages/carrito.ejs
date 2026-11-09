@@ -12,7 +12,7 @@
         <div class="col-lg-4">
           <div style="text-align: center;">
             <% if (restaurante.foto) { %>
-              <img class="logosintituciones" src="/imagenes/cod<%= restaurante.id %>/<%= restaurante.foto %>" width="170px" alt="">
+              <img class="logosintituciones" src="<%= urlFoto(restaurante.id, restaurante.foto) %>" width="170px" alt="">
             <% } else { %>
               <img class="logosintituciones" src="/img/logo_empresa_comodin.png" width="170px" alt="">
             <% } %>

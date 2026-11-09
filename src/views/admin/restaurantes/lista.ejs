@@ -1,0 +1,32 @@
+<%- include('../partials/head', { titulo }) %>
+<%- include('../partials/nav') %>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 m-0">Restaurantes</h1>
+  <a class="btn btn-dark" href="/admin/restaurantes/nuevo">Nuevo restaurante</a>
+</div>
+<% if (restaurantes.length === 0) { %>
+  <p class="text-muted">Aún no hay restaurantes. Crea el primero.</p>
+<% } else { %>
+<div class="table-responsive card card-body p-0">
+  <table class="table align-middle m-0">
+    <thead><tr><th></th><th>Nombre</th><th>Dirección</th><th>Contacto</th><th class="text-end">Cartas</th><th class="text-end">Comentarios</th><th></th></tr></thead>
+    <tbody>
+    <% restaurantes.forEach(function (r) { %>
+      <tr>
+        <td><% if (r.foto) { %><img class="thumb" src="<%= urlFoto(r.id, r.foto) %>" alt=""><% } %></td>
+        <td><a href="/admin/restaurantes/<%= r.id %>"><%= r.nombre %></a></td>
+        <td><%= r.calle %> <%= r.numero %>, <%= r.comuna %></td>
+        <td><%= r.fono %><br><small class="text-muted"><%= r.email %></small></td>
+        <td class="text-end"><%= r.cartas %></td>
+        <td class="text-end"><%= r.comentarios %></td>
+        <td class="text-end text-nowrap">
+          <a class="btn btn-sm btn-outline-dark" href="/admin/restaurantes/<%= r.id %>">Administrar</a>
+          <a class="btn btn-sm btn-outline-secondary" href="/restaurantes/<%= r.id %>" target="_blank" rel="noopener">Ver</a>
+        </td>
+      </tr>
+    <% }) %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+<%- include('../partials/foot') %>

@@ -58,7 +58,7 @@ describe('acceso al panel /admin (VUL-02, 09, 15, 16, 17)', () => {
     expect(sidDespues).not.toBe(sidAntes);
     const panel = await agente.get('/admin');
     expect(panel.status).toBe(200);
-    expect(panel.text).toContain('Panel de administración');
+    expect(panel.text).toContain('Nuevo restaurante');
   });
 
   test('con sesión de admin, el sitio público muestra la barra de administrador (no un login)', async () => {

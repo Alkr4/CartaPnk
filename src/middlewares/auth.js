@@ -5,7 +5,10 @@ function localsDeVista(req, res, next) {
   res.locals.usuario = req.session?.usuario ?? null;
   res.locals.esAdmin = req.session?.usuario?.rol === 'admin';
   res.locals.flash = req.session?.flash ?? null;
-  if (req.session?.flash) delete req.session.flash;
+  res.locals.flashTipo = req.session?.flashTipo ?? 'info';
+  if (req.session?.flash) { delete req.session.flash; delete req.session.flashTipo; }
+  // Foto de un restaurante/ítem: las subidas desde el panel viven en /media/...; las originales, en /imagenes/cod<id>/
+  res.locals.urlFoto = (restauranteId, foto) => (String(foto).startsWith('media/') ? `/${foto}` : `/imagenes/cod${restauranteId}/${foto}`);
   next();
 }
 

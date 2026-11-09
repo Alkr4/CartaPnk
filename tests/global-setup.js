@@ -7,5 +7,7 @@ module.exports = async () => {
   const { pool } = require('../src/db/pool');
   await migrar();
   await sembrar({ SEED_CATALOGO: 'true', SEED_USUARIOS_DEMO: 'true' });
+  // los contadores de intentos de login persisten en la BD: se reinician para que cada corrida parta limpia
+  await pool.query('TRUNCATE limite_intentos');
   await pool.end();
 };
