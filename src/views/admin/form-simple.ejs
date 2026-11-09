@@ -1,0 +1,11 @@
+<%- include('partials/head', { titulo }) %>
+<%- include('partials/nav') %>
+<h1 class="h3 mb-3"><%= titulo %></h1>
+<form action="<%= accion %>" method="post" class="card card-body" novalidate>
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <%- include('partials/campo', { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, max: 100 }) %>
+  <%- include('partials/campo', { nombre: 'orden', etiqueta: 'Orden (número menor = primero)', tipo: 'number' }) %>
+  <%- include('partials/check', { nombre: 'visible', etiqueta: 'Visible en el sitio' }) %>
+  <div class="mt-3"><button class="btn btn-dark" type="submit">Guardar</button> <a class="btn btn-outline-secondary" href="<%= volver %>">Cancelar</a></div>
+</form>
+<%- include('partials/foot') %>

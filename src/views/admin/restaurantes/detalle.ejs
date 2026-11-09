@@ -1,0 +1,73 @@
+<%- include('../partials/head', { titulo }) %>
+<%- include('../partials/nav') %>
+<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/admin">Restaurantes</a></li><li class="breadcrumb-item active"><%= restaurante.nombre %></li></ol></nav>
+
+<div class="card card-body mb-4">
+  <div class="d-flex gap-3 align-items-start flex-wrap">
+    <% if (restaurante.foto) { %><img class="thumb-lg" src="<%= urlFoto(restaurante.id, restaurante.foto) %>" alt=""><% } %>
+    <div class="flex-grow-1">
+      <h1 class="h4"><%= restaurante.nombre %></h1>
+      <div class="text-muted small">RUT <%= restaurante.rut %> · <%= restaurante.fono %> · <%= restaurante.email %></div>
+      <div class="text-muted small"><%= restaurante.calle %> <%= restaurante.numero %>, <%= restaurante.comuna %> <%= restaurante.region %></div>
+    </div>
+    <div class="text-nowrap">
+      <a class="btn btn-sm btn-outline-dark" href="/admin/restaurantes/<%= restaurante.id %>/editar">Editar</a>
+      <%- include('../partials/eliminar', { accion: '/admin/restaurantes/' + restaurante.id + '/eliminar', mensaje: '¿Eliminar el restaurante? Dejará de verse en el sitio.' }) %>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h2 class="h5 m-0">Cartas</h2>
+  <a class="btn btn-sm btn-dark" href="/admin/restaurantes/<%= restaurante.id %>/cartas/nueva">Nueva carta</a>
+</div>
+<% if (cartas.length === 0) { %><p class="text-muted">Sin cartas todavía.</p><% } %>
+<% cartas.forEach(function (carta) { %>
+<div class="card card-body">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <strong><%= carta.nombre %> <% if (!carta.visible) { %><span class="badge bg-secondary badge-estado">oculta</span><% } %></strong>
+    <div>
+      <a class="btn btn-sm btn-outline-dark" href="/admin/cartas/<%= carta.id %>/categorias/nueva">Nueva categoría</a>
+      <a class="btn btn-sm btn-outline-secondary" href="/admin/cartas/<%= carta.id %>/editar">Editar</a>
+      <%- include('../partials/eliminar', { accion: '/admin/cartas/' + carta.id + '/eliminar', mensaje: '¿Eliminar la carta?' }) %>
+    </div>
+  </div>
+  <% carta.categorias.forEach(function (cat) { %>
+  <div class="tree-level-1 mt-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span><%= cat.nombre %> <% if (!cat.visible) { %><span class="badge bg-secondary badge-estado">oculta</span><% } %></span>
+      <div>
+        <a class="btn btn-sm btn-outline-dark" href="/admin/categorias/<%= cat.id %>/items/nuevo">Nuevo platillo</a>
+        <a class="btn btn-sm btn-outline-secondary" href="/admin/categorias/<%= cat.id %>/editar">Editar</a>
+        <%- include('../partials/eliminar', { accion: '/admin/categorias/' + cat.id + '/eliminar', mensaje: '¿Eliminar la categoría?' }) %>
+      </div>
+    </div>
+    <% cat.items.forEach(function (it) { %>
+    <div class="tree-level-2 mt-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span class="d-flex align-items-center gap-2">
+        <% if (it.foto) { %><img class="thumb" src="<%= urlFoto(restaurante.id, it.foto) %>" alt=""><% } %>
+        <span><%= it.nombre %>
+          <% if (it.precio !== null) { %><small class="text-muted">$<%= it.precio.toLocaleString('es-CL') %></small><% } %>
+          <% if (it.destacado) { %><span class="badge bg-warning text-dark badge-estado">destacado</span><% } %>
+          <% if (!it.visible) { %><span class="badge bg-secondary badge-estado">oculto</span><% } %></span>
+      </span>
+      <div>
+        <a class="btn btn-sm btn-outline-secondary" href="/admin/items/<%= it.id %>/editar">Editar</a>
+        <%- include('../partials/eliminar', { accion: '/admin/items/' + it.id + '/eliminar', mensaje: '¿Eliminar el platillo?' }) %>
+      </div>
+    </div>
+    <% }) %>
+  </div>
+  <% }) %>
+</div>
+<% }) %>
+
+<h2 class="h5 mt-4">Comentarios (<%= comentarios.length %>)</h2>
+<% if (comentarios.length === 0) { %><p class="text-muted">Sin comentarios.</p><% } %>
+<% comentarios.forEach(function (c) { %>
+<div class="card card-body d-flex flex-row justify-content-between align-items-start gap-3">
+  <div><strong><%= c.usuario %></strong><div style="white-space: pre-line"><%= c.comentario %></div></div>
+  <%- include('../partials/eliminar', { accion: '/admin/comentarios/' + c.id + '/eliminar', mensaje: '¿Eliminar el comentario?' }) %>
+</div>
+<% }) %>
+<%- include('../partials/foot') %>

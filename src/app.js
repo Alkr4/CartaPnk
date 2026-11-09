@@ -11,6 +11,7 @@ const { localsDeVista } = require('./middlewares/auth');
 const { limiteGlobal } = require('./middlewares/limitadores');
 const { noEncontrado, manejadorErrores } = require('./middlewares/errores');
 const routes = require('./routes');
+const media = require('./routes/media');
 const { monedaChilena } = require('./utils/formato');
 
 /** Construye la aplicación Express (separada de server.js para poder probarla con supertest). */
@@ -40,6 +41,9 @@ function crearApp() {
     index: false,
     maxAge: config.esProduccion ? '7d' : 0,
   }));
+
+  // Imágenes subidas desde el panel (disco o S3): sin sesión ni límite global, con caché larga (nombres inmutables)
+  app.use('/media', media);
 
   app.use(limiteGlobal());
   app.use(express.urlencoded({ extended: false, limit: '10kb' }));

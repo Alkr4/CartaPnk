@@ -7,6 +7,8 @@
  *   qa          — pruebas de calidad: se comporta como producción (sin valores por defecto para secretos).
  *   production  — producción: secretos obligatorios, cookies Secure, HSTS.
  */
+const path = require('node:path');
+
 const AMBIENTES = ['development', 'test', 'qa', 'production'];
 
 const ambiente = process.env.APP_ENV || (process.env.NODE_ENV === 'production' ? 'production' : 'development');
@@ -55,6 +57,9 @@ const config = {
     user: obligatoria('DB_USER', 'pnk'),
     password: obligatoria('DB_PASSWORD', 'pnk'),
     max: entero('DB_POOL_MAX', 10),
+    // Conexión cifrada y verificada (obligatoria con Amazon RDS: DB_SSL=true). El certificado raíz de AWS se descarga al construir la imagen.
+    ssl: booleano('DB_SSL', false),
+    sslCa: process.env.DB_SSL_CA || path.join(__dirname, '..', '..', 'db', 'certs', 'rds-global-bundle.pem'),
   },
   sesion: {
     secreto: secretoSesion,
@@ -62,6 +67,14 @@ const config = {
     // Secure sólo cuando el sitio se sirve por HTTPS (producción detrás de Cloudflare). En QA local por HTTP debe ser false.
     cookieSecure: booleano('COOKIE_SECURE', ambiente === 'production'),
     duracionMs: entero('SESSION_HORAS', 8) * 60 * 60 * 1000,
+    duracionAdminMs: entero('ADMIN_SESION_HORAS', 2) * 60 * 60 * 1000, // el panel de administración expira antes
+  },
+  // Imágenes subidas desde el panel. local = disco (un servidor); s3 = bucket de Amazon S3 (varias instancias).
+  almacenamiento: {
+    driver: process.env.STORAGE_DRIVER === 's3' ? 's3' : 'local',
+    directorio: process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads'),
+    bucket: process.env.S3_BUCKET || '',
+    region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1',
   },
   seguridad: {
     hsts: booleano('ENABLE_HSTS', ambiente === 'production'),
@@ -72,5 +85,9 @@ const config = {
   },
   logs: process.env.LOG_FORMAT || (ambiente === 'development' ? 'dev' : 'combined'),
 };
+
+if (config.almacenamiento.driver === 's3' && !config.almacenamiento.bucket) {
+  throw new Error('STORAGE_DRIVER=s3 requiere S3_BUCKET');
+}
 
 module.exports = config;

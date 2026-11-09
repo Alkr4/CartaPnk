@@ -7,3 +7,9 @@ reportes/
 coverage/
 *.log
 .DS_Store
+
+# estado local del despliegue en AWS (contiene secretos generados)
+.despliegue/
+
+# imágenes subidas en desarrollo/QA (driver local)
+uploads/

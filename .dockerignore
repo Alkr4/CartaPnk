@@ -9,3 +9,4 @@ docs
 *.md
 Jenkinsfile
 npm-debug.log
+uploads

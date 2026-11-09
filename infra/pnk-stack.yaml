@@ -1,0 +1,475 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CartaPnk en AWS: VPC con subredes públicas y privadas, base de datos Amazon RDS PostgreSQL (privada),
+  Application Load Balancer y Auto Scaling Group de instancias EC2 que ejecutan la imagen Docker de la aplicación.
+  No crea recursos IAM (usa el perfil de instancia existente de AWS Academy: LabInstanceProfile).
+
+# ---------------------------------------------------------------------------------------------------------------------
+Parameters:
+  ImageUri:
+    Type: String
+    Description: URI completa de la imagen en ECR, con etiqueta (p. ej. 123456789012.dkr.ecr.us-east-1.amazonaws.com/cartapnk:abc123)
+    AllowedPattern: '^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9._/-]+:[A-Za-z0-9._-]+$'
+  DbPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+    MaxLength: 64
+    AllowedPattern: '^[A-Za-z0-9]+$'
+    ConstraintDescription: Sólo letras y números (12 a 64) para evitar caracteres que RDS no admite
+    Description: Contraseña del usuario administrador de la base de datos
+  SessionSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    MaxLength: 128
+    AllowedPattern: '^[A-Za-z0-9]+$'
+    Description: Secreto para firmar las cookies de sesión (mínimo 32 caracteres)
+  AdminEmail:
+    Type: String
+    Default: admin@cartapnk.cl
+    Description: Correo del primer administrador de la aplicación
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+    MaxLength: 64
+    AllowedPattern: '^[A-Za-z0-9]+$'
+    Description: Contraseña inicial del administrador (mínimo 12 caracteres)
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+    Description: Tipo de instancia de la aplicación (t3.small = 2 GB de RAM, recomendado)
+  AsgMinSize:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    Description: Instancias mínimas
+  AsgDesiredCapacity:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    Description: Instancias deseadas al crear la pila
+  AsgMaxSize:
+    Type: Number
+    Default: 4
+    MinValue: 1
+    Description: Instancias máximas
+  ScaleRequestsPerTarget:
+    Type: Number
+    Default: 300
+    MinValue: 10
+    Description: Escala hacia afuera cuando cada instancia supera este número de peticiones por minuto
+  DbInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    Description: Clase de la instancia RDS
+  DbEngineVersion:
+    Type: String
+    Default: "17"
+    Description: Versión mayor de PostgreSQL
+  DbAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 100
+    Description: Almacenamiento de RDS en GB
+  InstanceProfileName:
+    Type: String
+    Default: LabInstanceProfile
+    Description: Perfil de instancia existente con permiso para leer de ECR (en AWS Academy, LabInstanceProfile)
+  CookieSecure:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      "true" sólo si el balanceador sirve HTTPS (certificado ACM + dominio). Con el balanceador en HTTP debe ser "false",
+      porque el balanceador reescribe X-Forwarded-Proto a "http" y la cookie Secure no se emitiría.
+  TrustProxy:
+    Type: Number
+    Default: 2
+    MinValue: 0
+    MaxValue: 5
+    Description: Proxys de confianza delante de la app (balanceador + Cloudflare = 2; sólo balanceador = 1)
+  SeedCatalogo:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Cargar el catálogo de restaurantes de ejemplo si la base está vacía
+  CertificateArn:
+    Type: String
+    Default: ""
+    AllowedPattern: '^(arn:aws:acm:[a-z0-9-]+:[0-9]+:certificate/[a-f0-9-]+)?$'
+    ConstraintDescription: Debe ser el ARN de un certificado de ACM de esta región, o quedar vacío
+    Description: >-
+      ARN de un certificado de ACM (de su dominio). Si se indica, el balanceador agrega un listener HTTPS :443
+      (el :80 sigue disponible para pruebas de salud). Vacío = sólo HTTP.
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: AMI de Amazon Linux 2023 (se resuelve sola)
+
+# ---------------------------------------------------------------------------------------------------------------------
+Conditions:
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
+
+# ---------------------------------------------------------------------------------------------------------------------
+Resources:
+
+  # ---------------------------------------------------------------- Red
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: cartapnk-vpc }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: cartapnk-igw }]
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.20.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: cartapnk-publica-a }]
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.20.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: cartapnk-publica-b }]
+
+  # Las subredes privadas sólo alojan RDS: no tienen ruta a Internet (ni NAT Gateway, que cuesta dinero).
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.20.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{ Key: Name, Value: cartapnk-privada-a }]
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.20.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags: [{ Key: Name, Value: cartapnk-privada-b }]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: cartapnk-rutas-publicas }]
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  # ---------------------------------------------------------------- Grupos de seguridad (cadena: Internet -> ALB -> app -> BD)
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Balanceador - HTTP desde Internet
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: HTTP publico }
+        - !If
+          - HasCertificate
+          - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS publico }
+          - !Ref AWS::NoValue
+      Tags: [{ Key: Name, Value: cartapnk-alb-sg }]
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Aplicacion - solo recibe trafico del balanceador
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 3000, ToPort: 3000, SourceSecurityGroupId: !Ref AlbSecurityGroup, Description: App desde el ALB }
+      Tags: [{ Key: Name, Value: cartapnk-app-sg }]
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Base de datos - solo recibe trafico de la aplicacion
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref AppSecurityGroup, Description: PostgreSQL desde la app }
+      Tags: [{ Key: Name, Value: cartapnk-db-sg }]
+
+  # ---------------------------------------------------------------- Base de datos (RDS PostgreSQL)
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subredes privadas para RDS
+      SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete # laboratorio: no dejar instantáneas huérfanas que sigan costando
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn-lint:
+        config:
+          # La contraseña llega como parámetro NoEcho generado por el script (laboratorio). En producción real se usaría
+          # ManageMasterUserPassword / AWS Secrets Manager con referencias dinámicas (documentado en docs/DESPLIEGUE-AWS.md).
+          ignore_checks: [W1011]
+    Properties:
+      Engine: postgres
+      EngineVersion: !Ref DbEngineVersion
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: !Ref DbAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: pnk_prod
+      MasterUsername: pnk
+      MasterUserPassword: !Ref DbPassword
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      PubliclyAccessible: false
+      MultiAZ: false # para producción real: true
+      BackupRetentionPeriod: 0 # laboratorio; para producción real: 7 o más
+      DeletionProtection: false
+      AutoMinorVersionUpgrade: true
+      Tags: [{ Key: Name, Value: cartapnk-db }]
+
+  # ---------------------------------------------------------------- Balanceador de carga
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      Subnets: [!Ref PublicSubnetA, !Ref PublicSubnetB]
+      SecurityGroups: [!Ref AlbSecurityGroup]
+      Tags: [{ Key: Name, Value: cartapnk-alb }]
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref Vpc
+      Protocol: HTTP
+      Port: 3000
+      TargetType: instance
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /salud # la app responde 200 sólo si logra consultar la base de datos
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher: { HttpCode: "200" }
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "30" }
+      Tags: [{ Key: Name, Value: cartapnk-tg }]
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - { Type: forward, TargetGroupArn: !Ref TargetGroup }
+
+  # HTTPS (sólo si se entrega un certificado de ACM). Con Cloudflare en modo "Full (strict)" el tráfico viaja cifrado de extremo a extremo.
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - { Type: forward, TargetGroupArn: !Ref TargetGroup }
+
+  # ---------------------------------------------------------------- Imágenes subidas desde el panel (Amazon S3)
+  # Bucket PRIVADO: nadie accede por URL de S3; la aplicación lee/escribe con el rol de la instancia y sirve las imágenes en /media.
+  # Es compartido por todas las instancias del Auto Scaling (el disco de cada una es distinto y se pierde al reemplazarla).
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete          # entorno de laboratorio: al destruir la pila se elimina (vacíelo antes: desplegar.sh down lo hace)
+    UpdateReplacePolicy: Delete
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+
+  MediaBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MediaBucket
+      PolicyDocument:
+        Statement:
+          - Sid: SoloHttps
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt MediaBucket.Arn, !Sub "${MediaBucket.Arn}/*"]
+            Condition: { Bool: { "aws:SecureTransport": "false" } }
+
+  # ---------------------------------------------------------------- Instancias (plantilla de lanzamiento + Auto Scaling)
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "${AWS::StackName}-app"
+      LaunchTemplateData:
+        ImageId: !Ref LatestAmiId
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile: { Name: !Ref InstanceProfileName }
+        SecurityGroupIds: [!Ref AppSecurityGroup]
+        # IMDSv2 obligatorio; hop limit 2 para que el CONTENEDOR (un salto de red más) obtenga las credenciales del rol (acceso a S3)
+        MetadataOptions: { HttpTokens: required, HttpEndpoint: enabled, HttpPutResponseHopLimit: 2 }
+        TagSpecifications:
+          - ResourceType: instance
+            Tags: [{ Key: Name, Value: cartapnk-app }]
+        UserData:
+          Fn::Base64:
+            Fn::Sub:
+              - |
+                #!/bin/bash
+                set -euxo pipefail
+                exec > >(tee /var/log/pnk-userdata.log) 2>&1
+
+                dnf install -y docker
+                systemctl enable --now docker
+
+                # configuración de la aplicación (sólo legible por root)
+                umask 077
+                cat > /etc/pnk.env <<'ENV'
+                APP_ENV=production
+                PORT=3000
+                DB_HOST=${DbHost}
+                DB_PORT=5432
+                DB_NAME=pnk_prod
+                DB_USER=pnk
+                DB_PASSWORD=${DbPassword}
+                DB_SSL=true
+                SESSION_SECRET=${SessionSecret}
+                COOKIE_SECURE=${CookieSecure}
+                TRUST_PROXY=${TrustProxy}
+                SEED_CATALOGO=${SeedCatalogo}
+                ADMIN_EMAIL=${AdminEmail}
+                ADMIN_PASSWORD=${AdminPassword}
+                STORAGE_DRIVER=s3
+                S3_BUCKET=${MediaBucket}
+                AWS_REGION=${AWS::Region}
+                ENV
+                umask 022
+
+                # descargar y ejecutar la imagen (las migraciones corren solas al arrancar, con bloqueo entre instancias)
+                aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${Registry}
+                docker pull ${ImageUri}
+                docker rm -f pnk 2>/dev/null || true
+                docker run -d --name pnk --restart always -p 3000:3000 --env-file /etc/pnk.env \
+                  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 1g \
+                  --log-opt max-size=10m --log-opt max-file=3 ${ImageUri}
+              - Registry: !Select [0, !Split ["/", !Ref ImageUri]]
+                DbHost: !GetAtt Database.Endpoint.Address
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: [Database, Listener]
+    UpdatePolicy:
+      AutoScalingRollingUpdate: # al cambiar la imagen se reemplazan las instancias de a una, sin cortar el servicio
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        PauseTime: PT3M
+        WaitOnResourceSignals: false
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: !Ref AsgMinSize
+      MaxSize: !Ref AsgMaxSize
+      DesiredCapacity: !Ref AsgDesiredCapacity
+      VPCZoneIdentifier: [!Ref PublicSubnetA, !Ref PublicSubnetB]
+      TargetGroupARNs: [!Ref TargetGroup]
+      HealthCheckType: ELB # una instancia que no responde /salud se reemplaza automáticamente
+      HealthCheckGracePeriod: 300 # tiempo para instalar Docker, descargar la imagen y migrar
+      Tags:
+        - { Key: Name, Value: cartapnk-app, PropagateAtLaunch: true }
+
+  ScaleOnRequests:
+    Type: AWS::AutoScaling::ScalingPolicy
+    DependsOn: Listener
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Join ["/", [!GetAtt LoadBalancer.LoadBalancerFullName, !GetAtt TargetGroup.TargetGroupFullName]]
+        TargetValue: !Ref ScaleRequestsPerTarget
+
+  ScaleOnCpu:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 55
+
+# ---------------------------------------------------------------------------------------------------------------------
+Outputs:
+  ApplicationUrl:
+    Description: URL pública de la aplicación (HTTP)
+    Value: !Sub "http://${LoadBalancer.DNSName}"
+  LoadBalancerDns:
+    Description: Destino del registro CNAME de su dominio en Cloudflare
+    Value: !GetAtt LoadBalancer.DNSName
+  HttpsEnabled:
+    Value: !If [HasCertificate, "true", "false"]
+  DatabaseEndpoint:
+    Description: Endpoint de RDS (sólo accesible desde dentro de la VPC)
+    Value: !GetAtt Database.Endpoint.Address
+  MediaBucketName:
+    Description: Bucket S3 (privado) con las imágenes subidas desde el panel de administración
+    Value: !Ref MediaBucket
+  AutoScalingGroupName:
+    Value: !Ref AutoScalingGroup
+  TargetGroupArn:
+    Value: !Ref TargetGroup

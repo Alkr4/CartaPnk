@@ -14,7 +14,7 @@
           <div style="text-align: center;">
             <div class="d-flex">
               <% if (restaurante.foto) { %>
-                <img class="logosintituciones" src="/imagenes/cod<%= restaurante.id %>/<%= restaurante.foto %>" width="170px" alt="">
+                <img class="logosintituciones" src="<%= urlFoto(restaurante.id, restaurante.foto) %>" width="170px" alt="">
               <% } else { %>
                 <img class="logosintituciones" src="/img/logo_empresa_comodin.png" width="170px" alt="">
               <% } %>
@@ -66,7 +66,7 @@
       <% for (const d of destacados) { %>
         <div class="featured-item">
         <% if (d.foto) { %>
-          <img class="card-img rounded-0" width="350px" height="235px" src="/imagenes/cod<%= restaurante.id %>/<%= d.foto %>" alt="">
+          <img class="card-img rounded-0" width="350px" height="235px" src="<%= urlFoto(restaurante.id, d.foto) %>" alt="">
         <% } else { %>
           <img class="card-img rounded-0" src="/img/carta_comodin.png" width="350px" height="235px" alt="">
         <% } %>
@@ -132,7 +132,7 @@
                                                 <% if (!it.foto) { %>
                                                 <img class="me-3 me-sm-4" src="/img/carta_comodin.png" alt="" width="120px">
                                                 <% } else { %>
-                                                <img class="me-3 me-sm-4" src="/imagenes/cod<%= restaurante.id %>/<%= it.foto %>" alt="" width="120px">
+                                                <img class="me-3 me-sm-4" src="<%= urlFoto(restaurante.id, it.foto) %>" alt="" width="120px">
                                                 <% } %>
                                                 <div class="flex-grow-1">
                                                   <div class="d-flex justify-content-between food-card-title">
@@ -196,20 +196,6 @@
         <div class="col-lg-12">
           <div class="section-intro">
             <h4 class="intro-title">Comentarios</h4>
-            <% if (locals.usuario) { %>
-             <form action="/restaurantes/<%= restaurante.id %>/comentarios" method="post">
-              <input type="hidden" name="_csrf" value="<%= locals.csrfToken || '' %>">
-              <div class="mb-3">
-                <label for="usuario">Nombre:</label>
-                <input type="text" class="form-control" id="usuario" value="<%= usuario.nombre %>" readonly>
-              </div>
-              <div class="mb-3">
-                <label for="comentario">Comentario:</label>
-                <textarea class="form-control" rows="5" id="comentario" name="comentario" maxlength="1000" required></textarea>
-              </div>
-              <button type="submit" class="btn btn-success fa-align-right">Comentar</button>
-           </form>
-           <% } %>
           </div>
           <br>
           <% for (const c of comentarios) { %>

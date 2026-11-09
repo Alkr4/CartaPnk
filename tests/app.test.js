@@ -1,5 +1,5 @@
 'use strict';
-const { app, request, nuevoAgente, tokenCsrf, iniciarSesion } = require('./ayudas');
+const { app, request, nuevoAgente, tokenCsrf } = require('./ayudas');
 const { pool } = require('../src/db/pool');
 
 afterAll(() => pool.end());
@@ -34,6 +34,23 @@ describe('salud y navegación', () => {
     });
 });
 
+describe('sitio público sin login para los clientes', () => {
+  test('la carta no muestra ningún formulario de login ni de comentarios', async () => {
+    const res = await request(app).get('/restaurantes/1');
+    expect(res.text).not.toMatch(/type="password"/);
+    expect(res.text).not.toContain('/admin/login');
+    expect(res.text).not.toContain('Ingresar');
+    expect(res.text).not.toMatch(/<textarea/);
+  });
+
+  test.each(['/auth/login', '/restaurantes/1/comentarios'])('el endpoint público %s ya no existe', async (ruta) => {
+    const agente = nuevoAgente();
+    const token = await tokenCsrf(agente);
+    const res = await agente.post(ruta).type('form').send({ _csrf: token, comentario: 'x', email: 'a@b.cl', password: 'x' });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('cabeceras y cookies de seguridad (VUL-10, 11, 12)', () => {
   test('la respuesta incluye CSP, nosniff, X-Frame-Options y no revela la tecnología', async () => {
     const res = await request(app).get('/restaurantes/1');
@@ -62,7 +79,7 @@ describe('cabeceras y cookies de seguridad (VUL-10, 11, 12)', () => {
 
 describe('CSRF (VUL-14)', () => {
   test('login sin token CSRF -> 403', async () => {
-    const res = await request(app).post('/auth/login').type('form').send({ email: 'admin@gmail.com', password: 'admin01' });
+    const res = await request(app).post('/admin/login').type('form').send({ email: 'admin@gmail.com', password: 'admin01' });
     expect(res.status).toBe(403);
   });
 
@@ -81,130 +98,9 @@ describe('CSRF (VUL-14)', () => {
   });
 });
 
-describe('autenticación (VUL-02, 15, 17)', () => {
-  test('credenciales incorrectas no inician sesión y el mensaje es genérico', async () => {
-    const agente = nuevoAgente();
-    const res = await iniciarSesion(agente, { email: 'admin@gmail.com', password: 'incorrecta' });
-    expect(res.status).toBe(303);
-    const pagina = await agente.get('/restaurantes/1');
-    expect(pagina.text).toContain('Usuario o contraseña incorrectos.');
-    expect(pagina.text).not.toContain('Bienvenido');
-  });
-
-  test.each(["admin@gmail.com' -- -", "' OR '1'='1", "admin@gmail.com'; DROP TABLE usuarios; --"])(
-    'inyección SQL en el login (%s) no inicia sesión', async (email) => {
-      const agente = nuevoAgente();
-      await iniciarSesion(agente, { email, password: 'x' });
-      const pagina = await agente.get('/restaurantes/1');
-      expect(pagina.text).not.toContain('Bienvenido');
-    });
-
-  test('login correcto: muestra el usuario y cambia el identificador de sesión', async () => {
-    const agente = nuevoAgente();
-    const antes = await agente.get('/restaurantes/1');
-    const sidAntes = antes.headers['set-cookie'].find((c) => c.startsWith('pnk.sid=')).split(';')[0];
-    const res = await iniciarSesion(agente);
-    expect(res.status).toBe(303);
-    const sidDespues = res.headers['set-cookie'].find((c) => c.startsWith('pnk.sid=')).split(';')[0];
-    expect(sidDespues).not.toBe(sidAntes);
-    const pagina = await agente.get('/restaurantes/1');
-    expect(pagina.text).toContain('Bienvenido: Administrador');
-  });
-
-  test('las contraseñas se guardan con hash bcrypt, nunca en texto plano', async () => {
-    const { rows } = await pool.query('SELECT password_hash FROM usuarios');
-    expect(rows.length).toBeGreaterThan(0);
-    for (const { password_hash: h } of rows) expect(h).toMatch(/^\$2[aby]\$\d{2}\$/);
-  });
-
-  test('cerrar sesión destruye la sesión', async () => {
-    const agente = nuevoAgente();
-    await iniciarSesion(agente);
-    const token = await tokenCsrf(agente);
-    const res = await agente.post('/auth/logout').type('form').send({ _csrf: token, restaurante: '1' });
-    expect(res.status).toBe(303);
-    const pagina = await agente.get('/restaurantes/1');
-    expect(pagina.text).not.toContain('Bienvenido');
-  });
-
-  test('el redireccionamiento tras el login ignora destinos externos (sin open redirect)', async () => {
-    const agente = nuevoAgente();
-    const token = await tokenCsrf(agente);
-    const res = await agente.post('/auth/login').type('form')
-      .send({ _csrf: token, email: 'admin@gmail.com', password: 'admin01', restaurante: 'https://evil.example' });
-    expect(res.headers.location).toBe('/');
-  });
-});
-
-describe('fuerza bruta (VUL-16)', () => {
-  test('tras 5 intentos fallidos se bloquea el login', async () => {
-    const agente = nuevoAgente();
-    const email = `bloqueo-${Date.now()}@ejemplo.cl`;
-    for (let i = 0; i < 5; i += 1) {
-      await iniciarSesion(agente, { email, password: `mala-${i}` });
-    }
-    const res = await iniciarSesion(agente, { email, password: 'otra' });
-    expect(res.status).toBe(303);
-    expect(res.headers['retry-after']).toBeDefined();
-    const pagina = await agente.get('/restaurantes/1');
-    expect(pagina.text).toContain('Demasiados intentos fallidos');
-  });
-
-  test('los inicios de sesión correctos no consumen el límite', async () => {
-    for (let i = 0; i < 7; i += 1) {
-      const agente = nuevoAgente();
-      await iniciarSesion(agente, { email: 'alondra@gmail.com', password: 'alondra01' });
-      const pagina = await agente.get('/restaurantes/1');
-      expect(pagina.text).toContain('Bienvenido: Alondra');
-    }
-  });
-});
-
-describe('comentarios (VUL-05, 08, 09)', () => {
-  test('sin sesión no se puede comentar (401)', async () => {
-    const agente = nuevoAgente();
-    const token = await tokenCsrf(agente);
-    const res = await agente.post('/restaurantes/1/comentarios').type('form').send({ _csrf: token, comentario: 'hola' });
-    expect(res.status).toBe(401);
-  });
-
-  test('el contenido se guarda y se muestra escapado (sin XSS) y admite comillas', async () => {
-    const agente = nuevoAgente();
-    await iniciarSesion(agente);
-    const token = await tokenCsrf(agente);
-    const payload = `<script>alert('xss')</script> "comillas" y 'apóstrofes'`;
-    const res = await agente.post('/restaurantes/1/comentarios').type('form').send({ _csrf: token, comentario: payload });
-    expect(res.status).toBe(303);
-    const pagina = await agente.get('/restaurantes/1');
-    expect(pagina.text).toContain('&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;');
-    expect(pagina.text).not.toContain("<script>alert('xss')</script>");
-  });
-
-  test('el autor es el usuario de la sesión, no un valor enviado por el cliente', async () => {
-    const agente = nuevoAgente();
-    await iniciarSesion(agente, { email: 'alondra@gmail.com', password: 'alondra01' });
-    const token = await tokenCsrf(agente);
-    await agente.post('/restaurantes/1/comentarios').type('form').send({ _csrf: token, comentario: 'autor-real', usuario: 'Impostor' });
-    const { rows } = await pool.query(
-      "SELECT u.nombre FROM comentarios c JOIN usuarios u ON u.id = c.usuario_id WHERE c.comentario = 'autor-real' ORDER BY c.id DESC LIMIT 1");
-    expect(rows[0].nombre).toBe('Alondra');
-  });
-
-  test('comentario vacío o demasiado largo -> 400', async () => {
-    const agente = nuevoAgente();
-    await iniciarSesion(agente);
-    const token = await tokenCsrf(agente);
-    const vacio = await agente.post('/restaurantes/1/comentarios').type('form').send({ _csrf: token, comentario: '   ' });
-    const largo = await agente.post('/restaurantes/1/comentarios').type('form').send({ _csrf: token, comentario: 'x'.repeat(1001) });
-    expect(vacio.status).toBe(400);
-    expect(largo.status).toBe(400);
-  });
-});
-
 describe('carrito (VUL-04)', () => {
-  test('agregar, ver, quitar y vaciar; el carrito no cierra la sesión', async () => {
+  test('agregar, ver, quitar y vaciar el carrito (sin necesidad de login)', async () => {
     const agente = nuevoAgente();
-    await iniciarSesion(agente);
     const token = await tokenCsrf(agente);
     const json = (r) => r.set('X-CSRF-Token', token).set('Accept', 'application/json');
 
@@ -221,7 +117,7 @@ describe('carrito (VUL-04)', () => {
     expect(vaciado.body.cantidad).toBe(0);
 
     const pagina = await agente.get('/restaurantes/1');
-    expect(pagina.text).toContain('Bienvenido: Administrador');
+    expect(pagina.status).toBe(200);
   });
 
   test.each([['1 OR 1=1'], ["1'"], [-1], [0], ['abc'], [null], [{ $gt: 0 }]])(

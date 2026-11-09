@@ -1,0 +1,19 @@
+<%- include('../partials/head', { titulo }) %>
+<%- include('../partials/nav') %>
+<h1 class="h3 mb-3"><%= titulo %></h1>
+<form action="<%= restaurante ? '/admin/restaurantes/' + restaurante.id + '/editar' : '/admin/restaurantes' %>" method="post" enctype="multipart/form-data" class="card card-body" novalidate>
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <div class="row">
+    <%- include('../partials/campo', { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, max: 200, col: 'col-md-8' }) %>
+    <%- include('../partials/campo', { nombre: 'rut', etiqueta: 'RUT', requerido: true, max: 11, col: 'col-md-4' }) %>
+    <%- include('../partials/campo', { nombre: 'fono', etiqueta: 'Teléfono', requerido: true, max: 45, col: 'col-md-6' }) %>
+    <%- include('../partials/campo', { nombre: 'email', etiqueta: 'Correo', tipo: 'email', max: 100, col: 'col-md-6' }) %>
+    <%- include('../partials/campo', { nombre: 'calle', etiqueta: 'Calle', requerido: true, max: 100, col: 'col-md-6' }) %>
+    <%- include('../partials/campo', { nombre: 'numero', etiqueta: 'Número', requerido: true, max: 15, col: 'col-md-2' }) %>
+    <%- include('../partials/campo', { nombre: 'comuna', etiqueta: 'Comuna', requerido: true, max: 100, col: 'col-md-4' }) %>
+    <%- include('../partials/campo', { nombre: 'region', etiqueta: 'Región', max: 100, col: 'col-md-6' }) %>
+  </div>
+  <%- include('../partials/foto', { actual: restaurante ? restaurante.foto : null, restauranteId: restaurante ? restaurante.id : 0 }) %>
+  <div><button class="btn btn-dark" type="submit">Guardar</button> <a class="btn btn-outline-secondary" href="<%= restaurante ? '/admin/restaurantes/' + restaurante.id : '/admin' %>">Cancelar</a></div>
+</form>
+<%- include('../partials/foot') %>

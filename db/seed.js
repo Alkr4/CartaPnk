@@ -14,15 +14,15 @@ const { pool, query } = require('../src/db/pool');
 const bool = (v) => ['1', 'true', 'si', 'yes'].includes(String(v ?? '').toLowerCase());
 
 const USUARIOS_DEMO = [
-  { nombre: 'Administrador', email: 'admin@gmail.com', password: 'admin01' },
-  { nombre: 'Alondra', email: 'alondra@gmail.com', password: 'alondra01' },
+  { nombre: 'Administrador', email: 'admin@gmail.com', password: 'admin01', rol: 'admin' },
+  { nombre: 'Alondra', email: 'alondra@gmail.com', password: 'alondra01', rol: 'cliente' },
 ];
 
-async function crearUsuario({ nombre, email, password }) {
+async function crearUsuario({ nombre, email, password, rol = 'cliente' }) {
   const existe = await query('SELECT 1 FROM usuarios WHERE lower(email) = lower($1)', [email]);
   if (existe.rowCount) return false;
   const hash = await bcrypt.hash(password, config.seguridad.bcryptRondas);
-  await query('INSERT INTO usuarios (nombre, email, password_hash) VALUES ($1, $2, $3)', [nombre, email, hash]);
+  await query('INSERT INTO usuarios (nombre, email, password_hash, rol) VALUES ($1, $2, $3, $4)', [nombre, email, hash, rol]);
   return true;
 }
 
@@ -34,7 +34,21 @@ async function sembrarCatalogo() {
   console.log('[seed] catálogo cargado');
 }
 
+const BLOQUEO_SEED = 727002; // distinto del de las migraciones
+
+/** Siembra con un bloqueo global: con Auto Scaling varias instancias pueden arrancar a la vez. */
 async function sembrar(env = process.env) {
+  const cliente = await pool.connect();
+  try {
+    await cliente.query('SELECT pg_advisory_lock($1)', [BLOQUEO_SEED]);
+    await sembrarConBloqueo(env);
+  } finally {
+    await cliente.query('SELECT pg_advisory_unlock($1)', [BLOQUEO_SEED]).catch(() => {});
+    cliente.release();
+  }
+}
+
+async function sembrarConBloqueo(env) {
   if (bool(env.SEED_CATALOGO)) await sembrarCatalogo();
 
   if (bool(env.SEED_USUARIOS_DEMO)) {
@@ -46,8 +60,11 @@ async function sembrar(env = process.env) {
 
   if (env.ADMIN_EMAIL && env.ADMIN_PASSWORD) {
     if (env.ADMIN_PASSWORD.length < 12) throw new Error('ADMIN_PASSWORD debe tener al menos 12 caracteres');
-    if (await crearUsuario({ nombre: env.ADMIN_NOMBRE || 'Administrador', email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD })) {
+    if (await crearUsuario({ nombre: env.ADMIN_NOMBRE || 'Administrador', email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD, rol: 'admin' })) {
       console.log(`[seed] administrador creado: ${env.ADMIN_EMAIL}`);
+    } else {
+      // si el correo ya existía (p. ej. creado antes de existir los roles) se garantiza que sea administrador
+      await query("UPDATE usuarios SET rol = 'admin' WHERE lower(email) = lower($1) AND rol <> 'admin'", [env.ADMIN_EMAIL]);
     }
   }
 }

@@ -1,0 +1,17 @@
+<nav class="navbar navbar-dark bg-dark admin-nav">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/admin">PNK · Administración</a>
+    <div class="d-flex align-items-center gap-3">
+      <a class="text-light small" href="/" target="_blank" rel="noopener">Ver sitio público</a>
+      <span class="text-light small"><%= usuario.nombre %></span>
+      <form action="/admin/logout" method="post" class="m-0">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button type="submit" class="btn btn-sm btn-outline-light">Cerrar sesión</button>
+      </form>
+    </div>
+  </div>
+</nav>
+<main class="container admin-main">
+<% if (locals.flash) { %>
+  <div class="alert alert-<%= locals.flashTipo || 'info' %> mt-3" role="alert"><%= flash %></div>
+<% } %>
