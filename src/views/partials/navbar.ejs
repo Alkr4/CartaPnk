@@ -1,0 +1,19 @@
+<nav class="navbar navbar-light bg-light">
+<% if (!locals.usuario) { %>
+      <% if (locals.flash) { %><span class="text-danger small ms-2"><%= flash %></span><% } %>
+      <form class="d-flex flex-wrap align-items-center gap-2" role="search" action="/auth/login" method="post" autocomplete="off">
+        <input type="hidden" name="_csrf" value="<%= locals.csrfToken || '' %>">
+        <% if (locals.restaurante) { %><input type="hidden" name="restaurante" value="<%= restaurante.id %>"><% } %>
+        <div class="input-group w-auto">
+          <span class="input-group-text" id="basic-addon1">@</span>
+          <input type="text" class="form-control" name="email" placeholder="Usuario" maxlength="255" autocomplete="username" required>
+        </div>
+        <div>
+          <input type="password" class="form-control" name="password" placeholder="Contraseña" maxlength="1024" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn btn-outline-primary my-2 my-sm-0">Ingresar</button>
+      </form>
+<% } else { %>
+      <form class="d-flex align-items-center gap-2 m-0" action="/auth/logout" method="post">Bienvenido: <%= usuario.nombre %> - <input type="hidden" name="_csrf" value="<%= locals.csrfToken || '' %>"><% if (locals.restaurante) { %><input type="hidden" name="restaurante" value="<%= restaurante.id %>"><% } %><button type="submit" class="btn btn-link p-0">Cerrar Sesión</button></form>
+<% } %>
+</nav>

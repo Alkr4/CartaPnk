@@ -1,0 +1,240 @@
+<%- include('../partials/head', { titulo }) %>
+<%- include('../partials/navbar') %>
+  <section>
+    <div class="container contendor">
+      <div class="row">
+        <div class="col-lg-4">
+          <div style="text-align: center;">
+            <div class="d-flex">
+              <img class="logosintituciones" src="/img/logo.png" width="190px" alt="">
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div style="text-align: center;">
+            <div class="d-flex">
+              <% if (restaurante.foto) { %>
+                <img class="logosintituciones" src="/imagenes/cod<%= restaurante.id %>/<%= restaurante.foto %>" width="170px" alt="">
+              <% } else { %>
+                <img class="logosintituciones" src="/img/logo_empresa_comodin.png" width="170px" alt="">
+              <% } %>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="carro">
+            <div class="d-flex float-end">
+              <a class="button_carrito" href="/carrito?restaurante=<%= restaurante.id %>">
+              <%- include('../partials/icono-carrito') %>
+              Productos Seleccionados
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-lg-12">
+            <div class="text-center">
+              <h4><%= restaurante.nombre %></h4>
+              <h5>
+                <%- include('../partials/icono-ubicacion') %>
+              <%= restaurante.calle %> #<%= restaurante.numero %>, <%= restaurante.comuna %>
+              </h5>
+              <h5>
+              <% if (restaurante.fono) { %>
+                <%- include('../partials/icono-telefono') %>
+                <%= restaurante.fono %>
+              <% } %>
+              <% if (restaurante.email) { %>
+                <%- include('../partials/icono-correo') %>
+                <%= restaurante.email %>
+              <% } %>
+            </h5>
+            </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!--DESTACADOS-->
+  <% if (destacados.length > 0) { %>
+  <section class="destacados">
+    <div class="container contendor">
+      <div class="section-intro">
+        <h4 class="intro-title">Menús Destacados</h4>
+      </div>
+      <div class="owl-carousel owl-theme featured-carousel">
+      <% for (const d of destacados) { %>
+        <div class="featured-item">
+        <% if (d.foto) { %>
+          <img class="card-img rounded-0" width="350px" height="235px" src="/imagenes/cod<%= restaurante.id %>/<%= d.foto %>" alt="">
+        <% } else { %>
+          <img class="card-img rounded-0" src="/img/carta_comodin.png" width="350px" height="235px" alt="">
+        <% } %>
+          <div class="item-body">
+              <h3><%= d.nombre %></h3>
+            <p><%= d.descripcion %><br>
+            <%= d.observaciones %><br>
+            <% if (d.tiempo) { %>
+            <%- include('../partials/icono-alarma') %>
+                <%= ' ' + d.tiempo %>
+            <% } %>
+            </p>
+            <div class="d-flex justify-content-between">
+              <ul class="rating-star">
+                <% for (let i = 0; i < d.puntuacion; i++) { %>
+                    <li><i class="ti-star"></i></li>
+                <% } %>
+              </ul>
+              <h3 class="price-tag"><%= monedaChilena(d.precio) %></h3>
+            </div>
+            <a class="button" href="#" data-item-id="<%= d.id %>" style="margin:0%">Seleccionar</a>
+          </div>
+        </div>
+      <% } %>
+      </div>
+    </div>
+  </section>
+  <% } %>
+<section>
+    <div class="container contendor">
+       <div class="container">
+              <div class="row">
+                <div class="col-lg-12">
+                  <nav>
+                    <div class="nav nav-tabs nav-fill" id="nav-tab" role="tablist">
+                      <% cartas.forEach((carta, i) => { %>
+                        <a class="nav-item nav-link<%= i === 0 ? ' active' : '' %>" id="nav-carta-<%= carta.id %>-tab" data-bs-toggle="tab" href="#carta-<%= carta.id %>" role="tab" aria-controls="carta-<%= carta.id %>" aria-selected="<%= i === 0 %>"><%= carta.nombre %></a>
+                      <% }) %>
+                    </div>
+                  </nav>
+                  <div class="tab-content py-3 px-3 px-sm-0" id="nav-tabContent">
+                    <% cartas.forEach((carta, i) => { %>
+                    <div class="tab-pane fade <%= i === 0 ? 'show active' : '' %>" id="carta-<%= carta.id %>" role="tabpanel" aria-labelledby="nav-carta-<%= carta.id %>-tab">
+                      <% if (carta.categorias.length === 0) { %>
+                              <div class="row">
+                                <div class="col-lg-12">
+                                  <div class="text-center">
+                                    <h4>No hay información para Mostrar</h4>
+                                  </div>
+                                </div>
+                              </div>
+                      <% } else { %>
+                        <% for (const categoria of carta.categorias) { %>
+                                <div class="section-intro mb-20px">
+                                    <h4 class="intro-title"><%= categoria.nombre %></h4>
+                                </div>
+
+                                <div class="row">
+                                  <% if (categoria.items.length > 0) { %>
+                                    <% for (const it of categoria.items) { %>
+                                            <div class="<%= categoria.items.length > 1 ? 'col-lg-6 ' : 'col-lg-12' %>">
+                                              <div class="d-flex align-items-center food-card">
+                                                <% if (!it.foto) { %>
+                                                <img class="me-3 me-sm-4" src="/img/carta_comodin.png" alt="" width="120px">
+                                                <% } else { %>
+                                                <img class="me-3 me-sm-4" src="/imagenes/cod<%= restaurante.id %>/<%= it.foto %>" alt="" width="120px">
+                                                <% } %>
+                                                <div class="flex-grow-1">
+                                                  <div class="d-flex justify-content-between food-card-title">
+                                                    <h4><%= it.nombre %></h4>
+                                                    <h3 class="price-tag"><%= monedaChilena(it.precio) %></h3>
+                                                  </div>
+                                                  <p><%= it.descripcion %></br>
+                                                  <%= it.observaciones %></p>
+                                                  <% if (it.tiempo) { %>
+                                                  <p><%- include('../partials/icono-alarma') %>
+                                                      <%= ' ' + it.tiempo %></p>
+                                                  <% } %>
+                                                      <p>
+                                                        <ul class="rating-star">
+                                                          <% for (let k = 0; k < it.puntuacion; k++) { %>
+                                                              <li><i class="ti-star"></i></li>
+                                                          <% } %>
+                                                        </ul>
+                                                      </p>
+                                                  <a class="button float-right" href="#" data-item-id="<%= it.id %>">Seleccionar</a>
+                                                </div>
+                                              </div>
+                                            </div>
+                                    <% } %>
+                                  <% } else { %>
+                                        <div class="col-lg-12 ">
+                                          <div class="text-center">
+                                                <h4>No Información para Mostrar</h4>
+                                          </div>
+                                        </div>
+                                  <% } %>
+                                </div>
+                        <% } %>
+                      <% } %>
+                    </div>
+                    <% }) %>
+                  </div>
+                </div>
+              </div>
+        </div>
+    </div>
+</section>
+<div id="myModal" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title text-lg-center" id="exampleModalLabel">Selección de Producto</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        El producto seleccionado, ha sido agregado sin problemas!!!
+      </div>
+    </div>
+  </div>
+</div>
+
+<section>
+  <div class="container contendor">
+    <div class="container">
+      <div class="row">
+        <div class="col-lg-12">
+          <div class="section-intro">
+            <h4 class="intro-title">Comentarios</h4>
+            <% if (locals.usuario) { %>
+             <form action="/restaurantes/<%= restaurante.id %>/comentarios" method="post">
+              <input type="hidden" name="_csrf" value="<%= locals.csrfToken || '' %>">
+              <div class="mb-3">
+                <label for="usuario">Nombre:</label>
+                <input type="text" class="form-control" id="usuario" value="<%= usuario.nombre %>" readonly>
+              </div>
+              <div class="mb-3">
+                <label for="comentario">Comentario:</label>
+                <textarea class="form-control" rows="5" id="comentario" name="comentario" maxlength="1000" required></textarea>
+              </div>
+              <button type="submit" class="btn btn-success fa-align-right">Comentar</button>
+           </form>
+           <% } %>
+          </div>
+          <br>
+          <% for (const c of comentarios) { %>
+          <div class="card bg-light">
+            <div class="card-body">
+              <b><%= c.usuario %></b>
+              <br>
+              <%- include('../partials/texto-multilinea', { texto: c.comentario }) %>
+            </div>
+          </div>
+          <br>
+          <% } %>
+          <hr>
+        </div>
+      </div>
+    </div>
+  </div>
+  </section>
+
+<%- include('../partials/footer-carta') %>
+
+  <script src="/vendors/jquery/jquery-3.7.1.min.js"></script>
+  <script src="/vendors/bootstrap/bootstrap.bundle.min.js"></script>
+  <script src="/vendors/owl-carousel/owl.carousel.min.js"></script>
+  <script src="/js/main.js"></script>
+  <script src="/js/controladorajax.js"></script>
+</body>
+</html>
