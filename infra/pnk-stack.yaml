@@ -97,10 +97,22 @@ Parameters:
     Default: "true"
     AllowedValues: ["true", "false"]
     Description: Cargar el catálogo de restaurantes de ejemplo si la base está vacía
+  CertificateArn:
+    Type: String
+    Default: ""
+    AllowedPattern: '^(arn:aws:acm:[a-z0-9-]+:[0-9]+:certificate/[a-f0-9-]+)?$'
+    ConstraintDescription: Debe ser el ARN de un certificado de ACM de esta región, o quedar vacío
+    Description: >-
+      ARN de un certificado de ACM (de su dominio). Si se indica, el balanceador agrega un listener HTTPS :443
+      (el :80 sigue disponible para pruebas de salud). Vacío = sólo HTTP.
   LatestAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
     Description: AMI de Amazon Linux 2023 (se resuelve sola)
+
+# ---------------------------------------------------------------------------------------------------------------------
+Conditions:
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
 
 # ---------------------------------------------------------------------------------------------------------------------
 Resources:
@@ -194,6 +206,10 @@ Resources:
       VpcId: !Ref Vpc
       SecurityGroupIngress:
         - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: HTTP publico }
+        - !If
+          - HasCertificate
+          - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS publico }
+          - !Ref AWS::NoValue
       Tags: [{ Key: Name, Value: cartapnk-alb-sg }]
 
   AppSecurityGroup:
@@ -284,6 +300,20 @@ Resources:
       LoadBalancerArn: !Ref LoadBalancer
       Port: 80
       Protocol: HTTP
+      DefaultActions:
+        - { Type: forward, TargetGroupArn: !Ref TargetGroup }
+
+  # HTTPS (sólo si se entrega un certificado de ACM). Con Cloudflare en modo "Full (strict)" el tráfico viaja cifrado de extremo a extremo.
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
       DefaultActions:
         - { Type: forward, TargetGroupArn: !Ref TargetGroup }
 
@@ -393,7 +423,10 @@ Outputs:
     Description: URL pública de la aplicación (HTTP)
     Value: !Sub "http://${LoadBalancer.DNSName}"
   LoadBalancerDns:
+    Description: Destino del registro CNAME de su dominio en Cloudflare
     Value: !GetAtt LoadBalancer.DNSName
+  HttpsEnabled:
+    Value: !If [HasCertificate, "true", "false"]
   DatabaseEndpoint:
     Description: Endpoint de RDS (sólo accesible desde dentro de la VPC)
     Value: !GetAtt Database.Endpoint.Address

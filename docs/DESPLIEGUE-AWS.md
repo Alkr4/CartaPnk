@@ -118,7 +118,7 @@ La parte de Cloudflare se hace **a mano**. Sin dominio se usa un **túnel tempor
 Imprime una URL `https://<palabras>.trycloudflare.com` (déjela abierta; `Ctrl+C` la cierra). Equivale a:
 `docker run --rm cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://<dns-del-ALB>`.
 
-Con un **dominio** en Cloudflare: registro `CNAME` (con proxy activo) hacia `LoadBalancerDns` (salida de la pila), SSL/TLS en modo *Flexible* o, mejor, certificado ACM en el ALB y modo *Full (strict)*; y los ajustes de `docs/PUBLICACION.md` §3.4 (desactivar Rocket Loader, WAF, rate limiting).
+Con un **dominio propio** (HTTPS de extremo a extremo: Cloudflare → ALB con certificado de ACM, modo *Full (strict)*): siga [`docs/DOMINIO-CLOUDFLARE.md`](DOMINIO-CLOUDFLARE.md). El script automatiza el certificado (`./scripts/desplegar.sh certificado menu.sudominio.com`) y la activación de HTTPS (`up --sin-build`).
 
 `TRUST_PROXY=2` (balanceador + Cloudflare) ya viene configurado para que el límite de login use la IP real del visitante.
 
@@ -188,7 +188,7 @@ Tarda ~10 minutos. **Elimina la base de datos y sus datos.**
 - Límite de intentos de login **global** (PostgreSQL), sesiones y carrito en base de datos.
 
 **Límites conocidos (laboratorio) y cómo mejorarlos**
-- El ALB atiende **HTTP**; HTTPS exige un certificado ACM y un dominio. Entre Cloudflare y el ALB el tráfico va sin cifrar.
+- Sin dominio, el ALB atiende sólo **HTTP** (entre Cloudflare y el ALB el tráfico va sin cifrar). Con dominio y certificado de ACM se activa HTTPS de extremo a extremo (`docs/DOMINIO-CLOUDFLARE.md`).
 - Las instancias están en subredes públicas (para descargar imágenes sin NAT Gateway) aunque sólo aceptan tráfico del ALB.
 - Los secretos viajan en el `user-data` de la plantilla de lanzamiento; en producción real usar **AWS Secrets Manager** (`ManageMasterUserPassword`) y un rol de instancia que los lea.
 - RDS sin Multi-AZ y sin copias de seguridad automáticas (`BackupRetentionPeriod: 0`): sólo para laboratorio.

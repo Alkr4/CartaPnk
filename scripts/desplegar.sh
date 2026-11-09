@@ -6,6 +6,7 @@
 #   ./scripts/desplegar.sh up [--sin-build]   construye la imagen, la sube a ECR y crea/actualiza toda la infraestructura
 #   ./scripts/desplegar.sh status             estado de la pila, instancias, salud del balanceador y RDS
 #   ./scripts/desplegar.sh url                imprime la URL pública
+#   ./scripts/desplegar.sh certificado <dom>  pide un certificado de ACM para su dominio (HTTPS propio; validación DNS en Cloudflare)
 #   ./scripts/desplegar.sh tunel              publica la URL con un túnel TEMPORAL de Cloudflare (trycloudflare.com)
 #   ./scripts/desplegar.sh carga              genera tráfico para demostrar el Auto Scaling
 #   ./scripts/desplegar.sh down [--ecr]       DESTRUYE la infraestructura (pide confirmación; --ecr borra también las imágenes)
@@ -24,6 +25,7 @@ PLANTILLA="${RAIZ}/infra/pnk-stack.yaml"
 ESTADO="${RAIZ}/.despliegue"
 SECRETOS="${ESTADO}/secretos.env"
 ULTIMA_IMAGEN="${ESTADO}/ultima-imagen"
+CERT_FILE="${ESTADO}/certificado-arn"
 
 # ------------------------------------------------------------------------------------------------ utilidades de salida
 if [ -t 1 ]; then VERDE=$'\033[32m'; ROJO=$'\033[31m'; AMARILLO=$'\033[33m'; NEGRITA=$'\033[1m'; FIN=$'\033[0m'; else VERDE=""; ROJO=""; AMARILLO=""; NEGRITA=""; FIN=""; fi
@@ -84,6 +86,7 @@ cmd_verificar() {
   sonda "Auto Scaling: grupos"                      aws autoscaling describe-auto-scaling-groups --query 'length(AutoScalingGroups)' --output text
   sonda "ECR: repositorios"                         aws ecr describe-repositories --query 'length(repositories)' --output text
   sonda "CloudFormation: pilas"                     aws cloudformation list-stacks --max-items 1
+  if aws acm list-certificates --max-items 1 >/dev/null 2>&1; then ok "ACM: certificados disponibles (necesario sólo para HTTPS con dominio propio)"; else aviso "ACM no disponible en esta cuenta: con dominio use el modo 'Flexible' de Cloudflare (ver docs/DOMINIO-CLOUDFLARE.md)"; fi
   sonda "SSM: AMI de Amazon Linux 2023"             aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --query Parameter.Value --output text
   if aws iam get-instance-profile --instance-profile-name LabInstanceProfile --query 'InstanceProfile.InstanceProfileName' --output text >/dev/null 2>&1; then
     ok "IAM: perfil de instancia LabInstanceProfile existe"
@@ -161,6 +164,18 @@ eventos_fallidos() {
 desplegar_pila() {
   paso "Creando/actualizando la infraestructura (CloudFormation: pila '${STACK}')"
   aviso "La primera vez tarda ~10-15 minutos (la base de datos RDS es lo más lento). No cierre la terminal."
+  # Dominio propio + HTTPS: si existe un certificado de ACM (comando 'certificado'), el balanceador agrega :443 y la cookie pasa a Secure.
+  local cert="${PNK_CERT_ARN:-}"
+  if [ -z "${cert}" ] && [ -f "${CERT_FILE}" ]; then cert="$(cat "${CERT_FILE}")"; fi
+  local cookie_secure="${PNK_COOKIE_SECURE:-}"
+  if [ -z "${cookie_secure}" ]; then if [ -n "${cert}" ]; then cookie_secure=true; else cookie_secure=false; fi; fi
+  if [ -n "${cert}" ]; then
+    local estado_cert
+    estado_cert="$(aws acm describe-certificate --certificate-arn "${cert}" --query Certificate.Status --output text 2>/dev/null || echo DESCONOCIDO)"
+    [ "${estado_cert}" = "ISSUED" ] \
+      || die "El certificado ${cert} está en estado '${estado_cert}'. Complete la validación DNS en Cloudflare (./scripts/desplegar.sh certificado <dominio>) antes de desplegar con HTTPS."
+    ok "HTTPS activado con el certificado de ACM (cookie Secure: ${cookie_secure})"
+  fi
   local params=(
     "ImageUri=${IMAGEN}"
     "DbPassword=${DB_PASSWORD}"
@@ -171,9 +186,10 @@ desplegar_pila() {
     "AsgMinSize=${PNK_ASG_MIN:-2}"
     "AsgDesiredCapacity=${PNK_ASG_DESIRED:-2}"
     "AsgMaxSize=${PNK_ASG_MAX:-4}"
-    "CookieSecure=${PNK_COOKIE_SECURE:-false}"
+    "CookieSecure=${cookie_secure}"
     "TrustProxy=${PNK_TRUST_PROXY:-2}"
   )
+  [ -z "${cert}" ] || params+=("CertificateArn=${cert}")
   # ajustes opcionales según lo que permita su laboratorio
   [ -z "${PNK_DB_ENGINE_VERSION:-}" ] || params+=("DbEngineVersion=${PNK_DB_ENGINE_VERSION}")
   [ -z "${PNK_DB_CLASS:-}" ] || params+=("DbInstanceClass=${PNK_DB_CLASS}")
@@ -261,6 +277,51 @@ cmd_status() {
 
 cmd_url() { requisitos; salida_pila ApplicationUrl; }
 
+# Solicita un certificado de ACM para su dominio y guía la validación por DNS en Cloudflare (paso manual).
+cmd_certificado() {
+  local dominio="${1:-}"
+  [ -n "${dominio}" ] || die "Uso: ./scripts/desplegar.sh certificado <subdominio.sudominio.com>   (p. ej. menu.cartapnk.xyz)"
+  [[ "${dominio}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?\.[a-zA-Z]{2,}$ ]] || die "Dominio no válido: ${dominio}"
+  requisitos
+  paso "Certificado de ACM para ${dominio} (validación por DNS)"
+  mkdir -p "${ESTADO}"
+  local arn
+  arn="$(aws acm list-certificates --query "CertificateSummaryList[?DomainName=='${dominio}'].CertificateArn | [0]" --output text 2>/dev/null || true)"
+  if [ -z "${arn}" ] || [ "${arn}" = "None" ]; then
+    arn="$(aws acm request-certificate --domain-name "${dominio}" --validation-method DNS --query CertificateArn --output text)"
+    ok "solicitud creada"
+  else
+    ok "ya existía una solicitud para ese dominio"
+  fi
+  echo "${arn}" > "${CERT_FILE}"
+
+  local nombre="" valor="" i
+  for i in $(seq 1 30); do
+    nombre="$(aws acm describe-certificate --certificate-arn "${arn}" --query 'Certificate.DomainValidationOptions[0].ResourceRecord.Name' --output text 2>/dev/null || true)"
+    [ -n "${nombre}" ] && [ "${nombre}" != "None" ] && break
+    sleep 5
+  done
+  [ -n "${nombre}" ] && [ "${nombre}" != "None" ] || die "ACM aún no entregó el registro de validación; reintente en un minuto."
+  valor="$(aws acm describe-certificate --certificate-arn "${arn}" --query 'Certificate.DomainValidationOptions[0].ResourceRecord.Value' --output text)"
+
+  echo
+  printf '%s==============================================================================%s\n' "${NEGRITA}" "${FIN}"
+  printf '%s Cree este registro en Cloudflare (DNS → Records → Add record)%s\n' "${NEGRITA}" "${FIN}"
+  printf '   Tipo:           CNAME\n'
+  printf '   Nombre:         %s\n' "${nombre%.}"
+  printf '   Destino:        %s\n' "${valor%.}"
+  printf '   Proxy status:   DNS only  (nube GRIS, sin proxy)\n'
+  printf '%s==============================================================================%s\n' "${NEGRITA}" "${FIN}"
+  echo
+  paso "Esperando la validación (2-10 min después de crear el registro; Ctrl+C para salir y volver a ejecutar este comando luego)"
+  aws acm wait certificate-validated --certificate-arn "${arn}"
+  ok "certificado EMITIDO: ${arn}"
+  echo
+  echo "Siguiente paso:  ./scripts/desplegar.sh up --sin-build      (activa HTTPS en el balanceador)"
+  echo "Después, en Cloudflare:  DNS → CNAME  ${dominio%%.*}  →  $(salida_pila LoadBalancerDns 2>/dev/null || echo '<DNS del balanceador>')  (nube NARANJA, con proxy)"
+  echo "                         SSL/TLS → Overview → modo 'Full (strict)'"
+}
+
 cmd_tunel() {
   requisitos
   local dns; dns="$(salida_pila LoadBalancerDns)"
@@ -315,6 +376,7 @@ main() {
     tunel) cmd_tunel ;;
     carga) cmd_carga ;;
     down) cmd_down "$@" ;;
+    certificado) cmd_certificado "$@" ;;
     ""|-h|--help|help) uso ;;
     *) uso; die "Comando desconocido: ${cmd}" ;;
   esac
