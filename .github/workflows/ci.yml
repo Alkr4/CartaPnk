@@ -56,3 +56,25 @@ jobs:
 
       - name: Auditoría de dependencias de producción
         run: npm run audit:deps
+
+  # Valida la infraestructura como código: plantilla de CloudFormation y scripts de shell.
+  infraestructura:
+    name: infraestructura
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar cfn-lint
+        run: pip install cfn-lint
+
+      - name: Validar la plantilla de CloudFormation
+        run: cfn-lint infra/pnk-stack.yaml
+
+      - name: ShellCheck de los scripts (informativo)
+        continue-on-error: true
+        run: shellcheck -x scripts/desplegar.sh tools/mostrar-ambientes.sh docker/entrypoint.sh

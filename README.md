@@ -107,9 +107,22 @@ El informe de pentesting original (VUL-01 a VUL-22) deja de aplicar por diseño:
 (conserva los ids para que las rutas `imagenes/cod{id}/…` sigan funcionando). Las migraciones se aplican solas al arrancar
 el contenedor (`docker/entrypoint.sh`).
 
+## Despliegue escalable en AWS
+
+Además de Docker Compose (un solo servidor), el proyecto se despliega en AWS con **Amazon RDS PostgreSQL**, un **Application Load Balancer** y un **Auto Scaling Group**:
+
+```bash
+./scripts/desplegar.sh verificar   # comprueba herramientas y permisos de la cuenta (no crea nada)
+./scripts/desplegar.sh up          # imagen → ECR, infraestructura → CloudFormation, espera la salud y entrega la URL
+./scripts/desplegar.sh down        # destruye todo
+```
+
+La app es *stateless* (sesiones, carrito y límite de login en PostgreSQL), se conecta a RDS con TLS verificado y las instancias se reemplazan solas si fallan. Procedimiento completo en [`docs/DESPLIEGUE-AWS.md`](docs/DESPLIEGUE-AWS.md).
+
 ## Documentación adicional
 
 - [`docs/PUBLICACION.md`](docs/PUBLICACION.md) — publicar en **Git, AWS y Cloudflare** paso a paso.
+- [`docs/DESPLIEGUE-AWS.md`](docs/DESPLIEGUE-AWS.md) — **RDS + Load Balancer + Auto Scaling** en AWS con un solo script (`scripts/desplegar.sh`) y CloudFormation (`infra/`).
 - [`docs/FLUJO-GIT.md`](docs/FLUJO-GIT.md) — flujo `feature` → `develop` → `main`, relación con los ambientes de Docker, carpetas por ambiente y protección de `main`.
 - [`docs/DEMO-AMBIENTES.md`](docs/DEMO-AMBIENTES.md) — cómo mostrar los tres ambientes funcionando a la vez (con túneles temporales de Cloudflare) y tabla de diferencias.
 - [`docs/JENKINS.md`](docs/JENKINS.md) — plan de CI/CD con Jenkins y plugins de seguridad (OWASP / MITRE) para la 4.ª entrega; incluye un [`Jenkinsfile`](Jenkinsfile) borrador.
