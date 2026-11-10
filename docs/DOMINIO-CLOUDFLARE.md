@@ -122,10 +122,12 @@ export CLOUDFLARE_API_TOKEN=...                      # el token (no se guarda en
 ### Crear el token (2 minutos, una vez)
 
 1. Cloudflare → icono de su perfil → **My Profile → API Tokens → Create Token → Create Custom Token**.
-2. **Permissions** (3 filas): `Zone` · `DNS` · `Edit`   y   `Zone` · `Zone Settings` · `Edit`   y   `Zone` · `Zone` · `Read`.
-3. **Zone Resources**: `Include` → `Specific zone` → **cartapnk.xyz** (así el token no puede tocar ninguna otra zona).
-4. *(Recomendado)* **TTL**: fecha de vencimiento (p. ej. el día después de la entrega) y, si quiere, **Client IP Address Filtering**.
-5. **Continue to summary → Create Token** y copie el valor (se muestra **una sola vez**).
+2. **Policies → Add policy**. Elija el tipo de alcance **Zone** (*Account* y *User* otorgan acceso a toda la cuenta o al usuario: no los use).
+3. Recurso: **Include → Specific zone →** su dominio (así el token no puede tocar ninguna otra zona).
+4. Permisos: **DNS → Edit**, **Zone Settings → Edit** y **Zone → Read** (en una misma política o en varias, siempre con alcance *Zone* y el mismo dominio).
+5. **Token expiration**: fije una fecha de vencimiento (p. ej. el día después de la entrega).
+6. *(Opcional)* **Client IP Address Filtering**: restrinja las IP desde las que puede usarse el token. Si ejecuta el script desde CloudShell (IP distinta en cada sesión), déjelo vacío.
+7. **Continue to summary** → verifique el alcance *Zone*, el dominio y los tres permisos → **Create Token** y copie el valor (se muestra **una sola vez**).
 
 ### Qué hace `./scripts/desplegar.sh cloudflare [dominio] [--reemplazar]`
 
