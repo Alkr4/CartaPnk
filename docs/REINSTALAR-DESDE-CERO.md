@@ -54,6 +54,7 @@ cd CartaPnk
 ./scripts/desplegar.sh certificado cartapnk.xyz
 ```
 - Si el certificado **ya existe**, el script lo reutiliza, no pide nada nuevo y termina en segundos.
+- **Cuenta de AWS nueva:** los certificados de ACM no pasan de una cuenta a otra, así que este paso es obligatorio y el CNAME de validación **es distinto** al anterior.
 - Si es nuevo, imprime un registro **CNAME de validación**. Créelo en Cloudflare (*DNS → Records*) con **Proxy: DNS only (nube gris)**
   y espere a ver `certificado EMITIDO` (2-10 min).
 
@@ -71,6 +72,10 @@ curl -s "$(./scripts/desplegar.sh url)/salud"        # {"estado":"ok",...}
 ```
 
 ### 2.6 Apuntar el dominio al balanceador nuevo (¡siempre cambia!)
+> **Atajo:** `./scripts/desplegar.sh dominio cartapnk.xyz` imprime los dos registros de Cloudflare con los valores de **esta** cuenta (validación
+> del certificado y CNAME hacia el balanceador), el modo SSL, y comprueba si `https://cartapnk.xyz/salud` ya responde. Úselo al terminar el paso 2.4 y
+> en cualquier momento para saber qué falta.
+
 El DNS del balanceador **es distinto en cada pila nueva**. En Cloudflare (*DNS → Records*):
 
 | Tipo | Nombre | Destino | Proxy |
