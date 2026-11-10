@@ -13,6 +13,9 @@ jobs:
     name: calidad
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
 
     services:
       postgres:
@@ -44,6 +47,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: backend/package-lock.json
 
       - name: Instalar dependencias
         run: npm ci --no-audit --no-fund
@@ -77,4 +81,4 @@ jobs:
 
       - name: ShellCheck de los scripts (informativo)
         continue-on-error: true
-        run: shellcheck -x scripts/desplegar.sh tools/mostrar-ambientes.sh docker/entrypoint.sh
+        run: shellcheck -x scripts/desplegar.sh tools/mostrar-ambientes.sh backend/docker/entrypoint.sh

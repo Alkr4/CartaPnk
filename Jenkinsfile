@@ -57,13 +57,13 @@ pipeline {
       parallel {
         stage('npm audit') {
           steps {
-            sh 'docker run --rm -v "$PWD":/app -w /app $NODE_IMG sh -c "npm ci --omit=dev && npm audit --omit=dev --audit-level=high"'
+            sh 'docker run --rm -v "$PWD":/app -w /app/backend $NODE_IMG sh -c "npm ci --omit=dev && npm audit --omit=dev --audit-level=high"'
           }
         }
         stage('OWASP Dependency-Check') {
           steps {
             // (*) requiere la herramienta "dependency-check" configurada en Manage Jenkins > Tools
-            dependencyCheck additionalArguments: '--scan package-lock.json --format JSON --format XML --format HTML --out reportes/dependency-check --failOnCVSS 9',
+            dependencyCheck additionalArguments: '--scan backend/package-lock.json --format JSON --format XML --format HTML --out reportes/dependency-check --failOnCVSS 9',
                             odcInstallation: 'dependency-check'
             // (*) umbrales: el nombre exacto de los parámetros se valida en el generador de snippets
             dependencyCheckPublisher pattern: 'reportes/dependency-check/dependency-check-report.xml',
@@ -120,7 +120,7 @@ pipeline {
     // ---------------------------------------------------------------- MITRE: consolidar CWE -> CAPEC -> ATT&CK
     stage('Informe MITRE (CWE / CAPEC / ATT&CK)') {
       steps {
-        sh 'docker run --rm -v "$PWD":/app -w /app $NODE_IMG node tools/mapear-mitre.js reportes reportes/mitre.md'
+        sh 'docker run --rm -v "$PWD":/app -w /app $NODE_IMG node backend/tools/mapear-mitre.js reportes reportes/mitre.md'
       }
     }
 

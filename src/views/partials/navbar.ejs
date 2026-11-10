@@ -1,6 +1,0 @@
-<% if (locals.esAdmin) { %>
-<nav class="navbar navbar-light bg-light">
-  <span class="ms-2">Sesión de administrador: <b><%= usuario.nombre %></b> · <a href="/admin">Ir al panel</a></span>
-  <form class="d-flex align-items-center gap-2 m-0" action="/admin/logout" method="post"><input type="hidden" name="_csrf" value="<%= locals.csrfToken || '' %>"><button type="submit" class="btn btn-link p-0 me-2">Cerrar Sesión</button></form>
-</nav>
-<% } %>

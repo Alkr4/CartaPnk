@@ -1,50 +1,22 @@
 {
-  "name": "pnk-security-node",
+  "name": "cartapnk",
   "version": "1.0.0",
   "private": true,
-  "description": "PNK Security — menú digital para restaurantes (Node.js + Express + PostgreSQL, arquitectura MVC)",
-  "main": "src/server.js",
-  "engines": {
-    "node": ">=22"
-  },
+  "description": "CartaPnk: menú digital para restaurantes. backend (API Express + PostgreSQL) + frontend (sitio estático servido por Nginx)",
   "license": "UNLICENSED",
-  "dependencies": {
-    "@aws-sdk/client-s3": "^3.1165.0",
-    "bcryptjs": "^3.0.3",
-    "connect-pg-simple": "^10.0.0",
-    "ejs": "^7.0.2",
-    "express": "^5.3.0",
-    "express-rate-limit": "^8.7.3",
-    "express-session": "^1.19.0",
-    "helmet": "^8.3.0",
-    "morgan": "^1.12.1",
-    "multer": "^2.5.0",
-    "pg": "^8.23.1"
-  },
-  "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "eslint": "^10.14.0",
-    "eslint-plugin-security": "^4.2.1",
-    "globals": "^17.14.0",
-    "jest": "^30.5.2",
-    "nodemon": "^3.1.14",
-    "supertest": "^7.3.2"
-  },
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "nodemon --legacy-watch --watch src --watch public --ext js,ejs,css src/server.js",
-    "migrate": "node db/migrate.js",
-    "seed": "node db/seed.js",
-    "lint": "eslint . --max-warnings 0",
-    "test": "jest --runInBand",
-    "test:cobertura": "jest --runInBand --coverage",
-    "audit:deps": "npm audit --omit=dev --audit-level=high",
     "docker:dev": "docker compose -p pnk-dev --env-file env/dev.env -f docker-compose.yml -f docker-compose.dev.yml up --build",
     "docker:qa": "docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up --build --abort-on-container-exit --exit-code-from pruebas",
     "docker:qa:app": "docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up --build -d app db",
     "docker:prod": "docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f docker-compose.prod.yml up --build -d",
     "docker:down:dev": "docker compose -p pnk-dev --env-file env/dev.env -f docker-compose.yml -f docker-compose.dev.yml down",
     "docker:down:qa": "docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml down -v",
-    "docker:down:prod": "docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f docker-compose.prod.yml down"
+    "docker:down:prod": "docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f docker-compose.prod.yml down",
+    "lint": "npm --prefix backend run lint",
+    "test": "npm --prefix backend run test",
+    "test:cobertura": "npm --prefix backend run test:cobertura",
+    "audit:deps": "npm --prefix backend run audit:deps",
+    "migrate": "npm --prefix backend run migrate",
+    "seed": "npm --prefix backend run seed"
   }
 }

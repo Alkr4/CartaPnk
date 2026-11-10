@@ -11,6 +11,5 @@ services:
       - "${APP_PORT:-3000}:3000" # cambie APP_PORT en env/dev.env si 3000 está ocupado (p. ej. por producción en el mismo servidor)
     volumes:
       # el código se monta como volumen: al guardar un archivo, nodemon reinicia la app
-      - ./src:/app/src
-      - ./public:/app/public
-      - ./db:/app/db
+      - ./backend/src:/app/src
+      - ./backend/db:/app/db

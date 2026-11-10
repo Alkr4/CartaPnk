@@ -23,7 +23,7 @@ services:
 
   app:
     build:
-      context: .
+      context: ./backend
       target: produccion
     restart: unless-stopped
     depends_on:

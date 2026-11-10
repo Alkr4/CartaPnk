@@ -6,7 +6,7 @@ services:
   db:
     volumes:
       # crea además la base "pnk_test" que usan las pruebas automáticas (sólo en el primer arranque del volumen)
-      - ./docker/db-init:/docker-entrypoint-initdb.d:ro
+      - ./backend/docker/db-init:/docker-entrypoint-initdb.d:ro
 
   app:
     ports:
@@ -14,7 +14,7 @@ services:
 
   pruebas:
     build:
-      context: .
+      context: ./backend
       target: pruebas
     depends_on:
       db:
