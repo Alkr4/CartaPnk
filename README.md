@@ -124,6 +124,7 @@ La app es *stateless* (sesiones, carrito y límite de login en PostgreSQL), se c
 - [`docs/PUBLICACION.md`](docs/PUBLICACION.md) — publicar en **Git, AWS y Cloudflare** paso a paso.
 - [`docs/DOMINIO-CLOUDFLARE.md`](docs/DOMINIO-CLOUDFLARE.md) — comprar un dominio, agregarlo a Cloudflare y activar **HTTPS de extremo a extremo** con ACM.
 - [`docs/PANEL-ADMIN.md`](docs/PANEL-ADMIN.md) — panel `/admin` (CRUD de restaurantes, cartas, platillos y comentarios), roles y subida de imágenes (disco o S3).
+- [`docs/REINSTALAR-DESDE-CERO.md`](docs/REINSTALAR-DESDE-CERO.md) — **recuperación**: qué pasa si se borra una instancia o toda la pila y cómo levantar todo de nuevo paso a paso.
 - [`docs/DESPLIEGUE-AWS.md`](docs/DESPLIEGUE-AWS.md) — **RDS + Load Balancer + Auto Scaling** en AWS con un solo script (`scripts/desplegar.sh`) y CloudFormation (`infra/`).
 - [`docs/FLUJO-GIT.md`](docs/FLUJO-GIT.md) — flujo `feature` → `develop` → `main`, relación con los ambientes de Docker, carpetas por ambiente y protección de `main`.
 - [`docs/DEMO-AMBIENTES.md`](docs/DEMO-AMBIENTES.md) — cómo mostrar los tres ambientes funcionando a la vez (con túneles temporales de Cloudflare) y tabla de diferencias.
