@@ -49,6 +49,11 @@ El comando solicita el certificado a AWS y **imprime un registro CNAME de valida
 El script espera hasta que el certificado quede **EMITIDO** (2 a 10 minutos después de crear el registro).
 Si `./scripts/desplegar.sh verificar` avisa que **ACM no está disponible** en su cuenta, use el plan B (sección 6).
 
+> **Atajo: `./scripts/desplegar.sh dominio`** — en cualquier momento imprime, con los valores de SU cuenta de AWS, los registros que hay que crear en
+> Cloudflare (validación del certificado y CNAME del sitio), el modo SSL que corresponde y el **estado actual**: certificado emitido o pendiente,
+> HTTPS activo en el balanceador y si `https://su-dominio/salud` ya responde. No crea nada, se puede repetir las veces que haga falta.
+> Ejemplo: `./scripts/desplegar.sh dominio cartapnk.xyz` (sin argumento usa el certificado guardado). Detalle en la sección 5.
+
 ## 4. Activar HTTPS en el balanceador
 
 ```bash
@@ -57,21 +62,50 @@ Si `./scripts/desplegar.sh verificar` avisa que **ACM no está disponible** en s
 
 Detecta el certificado guardado y: agrega el listener HTTPS :443 al balanceador, abre el puerto 443 y activa la cookie de sesión `Secure` (`COOKIE_SECURE=true`). El puerto 80 sigue respondiendo (lo usan las pruebas de salud y `carga`).
 
-## 5. Publicar el subdominio en Cloudflare (manual)
+## 5. Publicar el dominio en Cloudflare (manual)
 
-1. **DNS → Add record**: tipo `CNAME`, nombre `menu`, destino = el DNS del balanceador (lo imprime el script; también `./scripts/desplegar.sh status`), **Proxy status: Proxied (nube naranja)**.
+```bash
+./scripts/desplegar.sh dominio cartapnk.xyz
+```
+
+Imprime (los valores son de ejemplo):
+
+```
+ REGISTRO 1 — validación del certificado de ACM   estado: ISSUED
+   Tipo: CNAME   Nombre: _a3d6….cartapnk.xyz   Destino: _c902….acm-validations.aws   Proxy status: DNS only (nube GRIS)
+ REGISTRO 2 — el sitio apunta al balanceador
+   Tipo: CNAME   Nombre: @ (la raíz)   Destino: cartap-LoadB-….us-east-1.elb.amazonaws.com   Proxy status: Proxied (nube NARANJA)
+ AJUSTE 3 — SSL/TLS → Overview: modo "Full (strict)"
+ Estado actual:  ✔ el balanceador ya sirve HTTPS   ✔ https://cartapnk.xyz/salud responde 200
+```
+
+Qué significa cada línea del estado:
+
+| Mensaje | Qué hacer |
+|---|---|
+| `certificado emitido` | Nada. Deje el registro 1 en Cloudflare: ACM lo usa para renovar el certificado solo. |
+| `falta crear el registro` (PENDING_VALIDATION) | Cree el registro 1 y espere 2-10 minutos. |
+| `el balanceador aún no usa HTTPS` | `./scripts/desplegar.sh up --sin-build` |
+| `Esta cuenta de AWS no tiene un certificado…` | Es una cuenta nueva: los certificados no pasan de una cuenta a otra. `./scripts/desplegar.sh certificado cartapnk.xyz` |
+| Cloudflare **522/523/524** | El CNAME apunta a un balanceador que ya no existe: edite el destino con el DNS nuevo que imprime el comando. |
+| Cloudflare **525/526** | SSL de Cloudflare no está en *Full (strict)* o el balanceador aún no usa el certificado. |
+| `todavía no responde` | El DNS aún no se propagó (unos minutos) o el sitio no está desplegado. |
+
+Pasos manuales equivalentes:
+
+1. **DNS → Add record**: tipo `CNAME`, nombre `@` (o el subdominio, p. ej. `menu`), destino = el DNS del balanceador (lo imprime el script; también `./scripts/desplegar.sh status`), **Proxy status: Proxied (nube naranja)**.
 2. **SSL/TLS → Overview**: modo **Full (strict)**.
 3. **SSL/TLS → Edge Certificates**: *Always Use HTTPS* activado; *Minimum TLS Version* 1.2.
 4. **Speed → Optimization**: desactive *Rocket Loader* (inyecta scripts y la política CSP de la app los bloquearía) y, si aparece, la inyección automática de *Web Analytics*.
-5. **Security → WAF**: active las reglas administradas disponibles y cree una regla de **rate limiting** para `POST /auth/login`.
+5. **Security → WAF**: active las reglas administradas disponibles y cree una regla de **rate limiting** para `POST /api/admin/login`.
 
 Verifique:
 
 ```bash
-curl -sI https://menu.cartapnk.xyz/restaurantes/1 | grep -iE "^(cf-ray|strict-transport|content-security|set-cookie)"
+curl -sI https://cartapnk.xyz/ | grep -iE "^(cf-ray|strict-transport|content-security|set-cookie)"
 ```
 
-Debe verse `cf-ray` (pasó por Cloudflare), `strict-transport-security` y la cookie `pnk.sid` con `Secure; HttpOnly; SameSite=Lax`. Inicie sesión en `https://menu.cartapnk.xyz` con el administrador.
+Debe verse `cf-ray` (pasó por Cloudflare), `strict-transport-security` y la cookie `pnk.sid` con `Secure; HttpOnly; SameSite=Lax`. Entre a `https://cartapnk.xyz/admin` con el administrador.
 
 ## 6. Plan B: Cloudflare en modo *Flexible* (sin ACM)
 
@@ -79,7 +113,7 @@ Si su cuenta no permite ACM: haga sólo el paso 5 con **SSL/TLS = Flexible** (Cl
 
 ## 7. Cosas que conviene saber
 
-- **Si destruye y vuelve a crear la pila** (`down` + `up`), el balanceador recibe un **DNS nuevo**: actualice el destino del `CNAME` en Cloudflare. El certificado de ACM **no** se borra con la pila, no hace falta pedirlo otra vez.
+- **Si destruye y vuelve a crear la pila** (`down` + `up`), el balanceador recibe un **DNS nuevo**: actualice el destino del `CNAME` en Cloudflare (`./scripts/desplegar.sh dominio` le imprime el destino nuevo). El certificado de ACM **no** se borra con la pila, no hace falta pedirlo otra vez.
 - **El balanceador sigue accesible directamente** por su DNS de AWS, saltándose el WAF de Cloudflare. Para cerrarlo, limite el grupo de seguridad del balanceador a los rangos de IP de Cloudflare (https://www.cloudflare.com/ips/); no se hizo por defecto porque esos rangos cambian y complican el laboratorio.
 - La tarifa del dominio es **anual**; el certificado de ACM es gratuito y se renueva solo mientras el registro de validación siga en Cloudflare (no lo borre).
 - Las credenciales del laboratorio caducan a las 4 horas, pero el dominio, la cuenta de Cloudflare y el certificado son permanentes.

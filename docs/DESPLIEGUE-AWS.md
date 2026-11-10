@@ -119,7 +119,7 @@ La parte de Cloudflare se hace **a mano**. Sin dominio se usa un **túnel tempor
 Imprime una URL `https://<palabras>.trycloudflare.com` (déjela abierta; `Ctrl+C` la cierra). Equivale a:
 `docker run --rm cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://<dns-del-ALB>`.
 
-Con un **dominio propio** (HTTPS de extremo a extremo: Cloudflare → ALB con certificado de ACM, modo *Full (strict)*): siga [`docs/DOMINIO-CLOUDFLARE.md`](DOMINIO-CLOUDFLARE.md). El script automatiza el certificado (`./scripts/desplegar.sh certificado menu.sudominio.com`) y la activación de HTTPS (`up --sin-build`).
+Con un **dominio propio** (HTTPS de extremo a extremo: Cloudflare → ALB con certificado de ACM, modo *Full (strict)*): siga [`docs/DOMINIO-CLOUDFLARE.md`](DOMINIO-CLOUDFLARE.md). El script automatiza el certificado (`./scripts/desplegar.sh certificado sudominio.com`) y la activación de HTTPS (`up --sin-build`); y **`./scripts/desplegar.sh dominio`** imprime qué registros crear en Cloudflare con los valores de su cuenta y comprueba si el dominio ya funciona.
 
 `TRUST_PROXY=2` (balanceador + Cloudflare) ya viene configurado para que el límite de login use la IP real del visitante.
 

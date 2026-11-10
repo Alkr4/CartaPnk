@@ -7,6 +7,7 @@
 #   ./scripts/desplegar.sh status             estado de la pila, instancias, salud del balanceador y RDS
 #   ./scripts/desplegar.sh url                imprime la URL pública
 #   ./scripts/desplegar.sh certificado <dom>  pide un certificado de ACM para su dominio (HTTPS propio; validación DNS en Cloudflare)
+#   ./scripts/desplegar.sh dominio [<dom>]    imprime qué crear en Cloudflare (registros CNAME y modo SSL) y comprueba si el dominio ya funciona
 #   ./scripts/desplegar.sh tunel              publica la URL con un túnel TEMPORAL de Cloudflare (trycloudflare.com)
 #   ./scripts/desplegar.sh carga              genera tráfico para demostrar el Auto Scaling
 #   ./scripts/desplegar.sh down [--ecr]       DESTRUYE la infraestructura (pide confirmación; --ecr borra también las imágenes)
@@ -319,9 +320,89 @@ cmd_certificado() {
   aws acm wait certificate-validated --certificate-arn "${arn}"
   ok "certificado EMITIDO: ${arn}"
   echo
-  echo "Siguiente paso:  ./scripts/desplegar.sh up --sin-build      (activa HTTPS en el balanceador)"
+  echo "Siguiente paso:  ./scripts/desplegar.sh up --sin-build      (activa HTTPS en el balanceador); luego ./scripts/desplegar.sh dominio ${dominio} te dice qué crear en Cloudflare"
   echo "Después, en Cloudflare:  DNS → CNAME  ${dominio%%.*}  →  $(salida_pila LoadBalancerDns 2>/dev/null || echo '<DNS del balanceador>')  (nube NARANJA, con proxy)"
   echo "                         SSL/TLS → Overview → modo 'Full (strict)'"
+}
+
+# Imprime TODO lo que hay que crear/configurar en Cloudflare para el dominio, con los valores de ESTA cuenta de AWS, y comprueba
+# el estado (certificado, HTTPS del balanceador, respuesta real del dominio). No crea nada en AWS: se puede ejecutar las veces que quiera.
+cmd_dominio() {
+  local dominio="${1:-}" arn=""
+  requisitos
+  if [ -n "${dominio}" ]; then
+    [[ "${dominio}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?\.[a-zA-Z]{2,}$ ]] || die "Dominio no válido: ${dominio}"
+    arn="$(aws acm list-certificates --query "CertificateSummaryList[?DomainName=='${dominio}'].CertificateArn | [0]" --output text 2>/dev/null || true)"
+  else
+    # sin argumento: se usa el certificado guardado o, si hay uno solo en la cuenta, ese
+    if [ -f "${CERT_FILE}" ]; then arn="$(cat "${CERT_FILE}")"; fi
+    if [ -z "${arn}" ]; then
+      local lista
+      lista="$(aws acm list-certificates --query 'CertificateSummaryList[].CertificateArn' --output text 2>/dev/null || true)"
+      [ "$(wc -w <<<"${lista}")" -eq 1 ] && arn="${lista}"
+    fi
+    [ -n "${arn}" ] && [ "${arn}" != "None" ] || die "No hay un certificado que usar. Indique el dominio: ./scripts/desplegar.sh dominio cartapnk.xyz   (si es una cuenta nueva, primero: ./scripts/desplegar.sh certificado cartapnk.xyz)"
+    dominio="$(aws acm describe-certificate --certificate-arn "${arn}" --query Certificate.DomainName --output text)"
+  fi
+  [ -n "${arn}" ] && [ "${arn}" != "None" ] || die "Esta cuenta de AWS no tiene un certificado para ${dominio}. Los certificados no pasan de una cuenta a otra: ejecute primero ./scripts/desplegar.sh certificado ${dominio}"
+  mkdir -p "${ESTADO}"
+  echo "${arn}" > "${CERT_FILE}"
+
+  paso "Configuración de Cloudflare para ${dominio}  (cuenta ${CUENTA}, región ${REGION})"
+  local estado nombre valor
+  estado="$(aws acm describe-certificate --certificate-arn "${arn}" --query Certificate.Status --output text)"
+  nombre="$(aws acm describe-certificate --certificate-arn "${arn}" --query 'Certificate.DomainValidationOptions[0].ResourceRecord.Name' --output text 2>/dev/null || true)"
+  valor="$(aws acm describe-certificate --certificate-arn "${arn}" --query 'Certificate.DomainValidationOptions[0].ResourceRecord.Value' --output text 2>/dev/null || true)"
+
+  # ---- registro 1: validación del certificado (ACM)
+  echo
+  printf '%s REGISTRO 1 — validación del certificado de ACM%s   estado: %s\n' "${NEGRITA}" "${FIN}" "${estado}"
+  if [ -n "${nombre}" ] && [ "${nombre}" != "None" ]; then
+    printf '   Tipo:           CNAME\n   Nombre:         %s\n   Destino:        %s\n   Proxy status:   DNS only  (nube GRIS, sin proxy)\n' "${nombre%.}" "${valor%.}"
+  fi
+  case "${estado}" in
+    ISSUED) ok "certificado emitido. Deje este registro en Cloudflare: ACM lo usa para renovarlo solo" ;;
+    PENDING_VALIDATION) aviso "falta crear el registro y esperar 2-10 min (./scripts/desplegar.sh certificado ${dominio} espera la validación)" ;;
+    *) falla "estado inesperado del certificado (${estado}): pida uno nuevo con ./scripts/desplegar.sh certificado ${dominio}" ;;
+  esac
+
+  # ---- registro 2: el sitio apunta al balanceador
+  local lb https etiqueta
+  lb="$(salida_pila LoadBalancerDns 2>/dev/null || true)"
+  https="$(salida_pila HttpsEnabled 2>/dev/null || true)"
+  if [ "$(tr -cd '.' <<<"${dominio}" | wc -c)" -le 1 ]; then etiqueta="@   (la raíz: ${dominio})"; else etiqueta="${dominio%%.*}"; fi
+  echo
+  printf '%s REGISTRO 2 — el sitio apunta al balanceador%s\n' "${NEGRITA}" "${FIN}"
+  printf '   Tipo:           CNAME\n   Nombre:         %s\n' "${etiqueta}"
+  if [ -n "${lb}" ] && [ "${lb}" != "None" ]; then
+    printf '   Destino:        %s\n' "${lb}"
+  else
+    printf '   Destino:        (aún no hay pila: ejecute ./scripts/desplegar.sh up y repita este comando)\n'
+  fi
+  printf '   Proxy status:   Proxied  (nube NARANJA)\n'
+  echo "   Si ya existe un registro con ese nombre, EDITE su destino (no cree otro). El DNS del balanceador cambia con cada pila nueva."
+
+  # ---- ajuste 3
+  echo
+  printf '%s AJUSTE 3 — SSL/TLS → Overview%s: modo "Full (strict)"\n' "${NEGRITA}" "${FIN}"
+
+  # ---- comprobaciones
+  echo
+  paso "Estado actual"
+  if [ "${https}" = "true" ]; then
+    ok "el balanceador ya sirve HTTPS (listener 443)"
+  elif [ "${estado}" = "ISSUED" ] && [ -n "${lb}" ]; then
+    aviso "el certificado está listo pero el balanceador aún no usa HTTPS: ejecute ./scripts/desplegar.sh up --sin-build"
+  fi
+  local codigo
+  codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://${dominio}/salud" 2>/dev/null || true)"
+  case "${codigo}" in
+    200) ok "https://${dominio}/salud responde 200: el dominio ya funciona" ;;
+    000|"") aviso "https://${dominio} todavía no responde (DNS sin crear/propagar, o el sitio no está desplegado)" ;;
+    525|526) falla "Cloudflare responde ${codigo}: revise el modo SSL (Full strict) y que el balanceador ya use el certificado (up --sin-build)" ;;
+    522|523|524) falla "Cloudflare responde ${codigo}: el CNAME apunta a un balanceador que no existe o no responde (¿DNS del balanceador antiguo?)" ;;
+    *) aviso "https://${dominio}/salud respondió ${codigo}" ;;
+  esac
 }
 
 cmd_tunel() {
@@ -372,7 +453,7 @@ cmd_down() {
   fi
 }
 
-uso() { sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+uso() { sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 main() {
   local cmd="${1:-}"; shift || true
@@ -385,6 +466,7 @@ main() {
     carga) cmd_carga ;;
     down) cmd_down "$@" ;;
     certificado) cmd_certificado "$@" ;;
+    dominio) cmd_dominio "$@" ;;
     ""|-h|--help|help) uso ;;
     *) uso; die "Comando desconocido: ${cmd}" ;;
   esac
