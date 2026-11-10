@@ -127,22 +127,27 @@ construir_y_subir() {
   ok "repositorio ECR: ${REPO}"
 
   local etiqueta="${PNK_IMAGE_TAG:-$(git -C "${RAIZ}" rev-parse --short HEAD 2>/dev/null || echo local)-$(date +%Y%m%d%H%M%S)}"
-  IMAGEN="${registro}/${REPO}:${etiqueta}"
+  # un solo repositorio ECR con dos imágenes, distinguidas por la etiqueta: back-<tag> (API) y front-<tag> (sitio web con Nginx)
+  IMAGEN_BACK="${registro}/${REPO}:back-${etiqueta}"
+  IMAGEN_FRONT="${registro}/${REPO}:front-${etiqueta}"
 
-  if [ "${SIN_BUILD:-0}" = "1" ] && [ -f "${ULTIMA_IMAGEN}" ]; then
-    IMAGEN="$(cat "${ULTIMA_IMAGEN}")"
-    ok "se reutiliza la última imagen: ${IMAGEN}"
+  if [ "${SIN_BUILD:-0}" = "1" ] && [ -f "${ULTIMA_IMAGEN}" ] && [ "$(wc -l < "${ULTIMA_IMAGEN}")" -ge 2 ]; then
+    IMAGEN_BACK="$(sed -n 1p "${ULTIMA_IMAGEN}")"
+    IMAGEN_FRONT="$(sed -n 2p "${ULTIMA_IMAGEN}")"
+    ok "se reutilizan las últimas imágenes: ${IMAGEN_BACK} y ${IMAGEN_FRONT}"
     return
   fi
 
-  paso "Construyendo la imagen (etapa 'produccion')"
+  paso "Construyendo las imágenes (backend: etapa 'produccion'; frontend: Nginx)"
   aviso "En un servidor de 1 GB de RAM necesita swap activo (ver docs/PUBLICACION.md); puede tardar varios minutos."
-  docker build --target produccion -t "${IMAGEN}" "${RAIZ}"
-  paso "Subiendo la imagen a ECR"
+  docker build --target produccion -t "${IMAGEN_BACK}" "${RAIZ}/backend"
+  docker build -t "${IMAGEN_FRONT}" "${RAIZ}/frontend"
+  paso "Subiendo las imágenes a ECR"
   aws ecr get-login-password | docker login --username AWS --password-stdin "${registro}" >/dev/null
-  docker push "${IMAGEN}"
-  echo "${IMAGEN}" > "${ULTIMA_IMAGEN}"
-  ok "imagen publicada: ${IMAGEN}"
+  docker push "${IMAGEN_BACK}"
+  docker push "${IMAGEN_FRONT}"
+  { echo "${IMAGEN_BACK}"; echo "${IMAGEN_FRONT}"; } > "${ULTIMA_IMAGEN}"
+  ok "imágenes publicadas: ${IMAGEN_BACK} y ${IMAGEN_FRONT}"
 }
 
 # ------------------------------------------------------------------------------------------------ pila
@@ -178,7 +183,8 @@ desplegar_pila() {
     ok "HTTPS activado con el certificado de ACM (cookie Secure: ${cookie_secure})"
   fi
   local params=(
-    "ImageUri=${IMAGEN}"
+    "BackImageUri=${IMAGEN_BACK}"
+    "FrontImageUri=${IMAGEN_FRONT}"
     "DbPassword=${DB_PASSWORD}"
     "SessionSecret=${SESSION_SECRET}"
     "AdminEmail=${ADMIN_EMAIL}"
@@ -188,7 +194,7 @@ desplegar_pila() {
     "AsgDesiredCapacity=${PNK_ASG_DESIRED:-2}"
     "AsgMaxSize=${PNK_ASG_MAX:-4}"
     "CookieSecure=${cookie_secure}"
-    "TrustProxy=${PNK_TRUST_PROXY:-2}"
+    "TrustProxy=${PNK_TRUST_PROXY:-3}"
   )
   [ -z "${cert}" ] || params+=("CertificateArn=${cert}")
   # ajustes opcionales según lo que permita su laboratorio
@@ -339,7 +345,7 @@ cmd_carga() {
   [ -n "${url}" ] || die "La pila no está desplegada."
   paso "Generando carga contra ${url}/restaurantes/1 (${PNK_CARGA_N:-60000} peticiones, ${PNK_CARGA_C:-80} simultáneas)"
   aviso "Mientras corre, en otra terminal: watch -n 15 ./scripts/desplegar.sh status   (la escala tarda 3-5 minutos en reaccionar)"
-  docker run --rm httpd:alpine ab -k -n "${PNK_CARGA_N:-60000}" -c "${PNK_CARGA_C:-80}" "${url}/restaurantes/1"
+  docker run --rm httpd:alpine ab -k -n "${PNK_CARGA_N:-60000}" -c "${PNK_CARGA_C:-80}" "${url}/api/restaurantes/1"
 }
 
 cmd_down() {

@@ -61,7 +61,7 @@ cd CartaPnk
 ```bash
 ./scripts/desplegar.sh up
 ```
-Construye la imagen, la sube a ECR y crea red, RDS, bucket S3, balanceador y Auto Scaling (~15 min). Al final imprime la **URL del balanceador**
+Construye las imágenes (front y back), las sube a ECR y crea red, RDS, bucket S3, balanceador y Auto Scaling (~15 min). Al final imprime la **URL del balanceador**
 y el usuario administrador. Si existe el archivo del certificado, activa HTTPS solo.
 
 ### 2.5 Comprobar

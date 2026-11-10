@@ -1,16 +1,16 @@
 # AMBIENTE DE QA — imagen idéntica a la de producción (target "produccion") + contenedor de pruebas automáticas.
 #
 #   npm run docker:qa      construye, ejecuta lint + pruebas + auditoría y termina con el código de salida de las pruebas
-#   npm run docker:qa:app  deja sólo la app y su base disponibles en http://localhost:3001 para pruebas manuales/ZAP
+#   npm run docker:qa:app  deja sólo el sitio (front + back) y su base disponibles en http://localhost:3001 para pruebas manuales/ZAP
 services:
   db:
     volumes:
       # crea además la base "pnk_test" que usan las pruebas automáticas (sólo en el primer arranque del volumen)
       - ./backend/docker/db-init:/docker-entrypoint-initdb.d:ro
 
-  app:
+  front:
     ports:
-      - "3001:3000"
+      - "3001:8080"
 
   pruebas:
     build:

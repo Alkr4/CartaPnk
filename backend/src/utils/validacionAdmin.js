@@ -14,7 +14,7 @@ function validarCampo(def, bruto) {
   if (def.tipo === 'bool') return { valor: ['on', '1', 'true'].includes(String(bruto ?? '').toLowerCase()) };
 
   if (vacio) {
-    if (def.requerido) return { error: `${etiqueta} es obligatorio` };
+    if (def.requerido) return { error: `${etiqueta}: campo obligatorio` };
     return { valor: def.porDefecto ?? null };
   }
   if (typeof bruto !== 'string') return { error: `${etiqueta} no es válido` };

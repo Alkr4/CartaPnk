@@ -49,7 +49,13 @@
   /** 12500 -> "$ 12.500" (igual que el sitio original). */
   function moneda(n) {
     var v = Number.isFinite(Number(n)) ? Math.trunc(Number(n)) : 0;
-    return '$ ' + (v < 0 ? '-' : '') + String(Math.abs(v)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    var digitos = String(Math.abs(v));
+    var agrupado = '';
+    for (var i = 0; i < digitos.length; i += 1) {
+      if (i > 0 && (digitos.length - i) % 3 === 0) agrupado += '.';
+      agrupado += digitos.charAt(i);
+    }
+    return '$ ' + (v < 0 ? '-' : '') + agrupado;
   }
 
   // ------------------------------------------------------------------ iconos (SVG constantes, sin datos del usuario)

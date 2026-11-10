@@ -7,7 +7,7 @@
   "scripts": {
     "docker:dev": "docker compose -p pnk-dev --env-file env/dev.env -f docker-compose.yml -f docker-compose.dev.yml up --build",
     "docker:qa": "docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up --build --abort-on-container-exit --exit-code-from pruebas",
-    "docker:qa:app": "docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up --build -d app db",
+    "docker:qa:app": "docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up --build -d back front db",
     "docker:prod": "docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f docker-compose.prod.yml up --build -d",
     "docker:down:dev": "docker compose -p pnk-dev --env-file env/dev.env -f docker-compose.yml -f docker-compose.dev.yml down",
     "docker:down:qa": "docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml down -v",

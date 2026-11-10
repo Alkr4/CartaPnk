@@ -21,7 +21,8 @@ services:
       timeout: 3s
       retries: 12
 
-  app:
+  # API (Express). No publica puertos: sólo el frontend (Nginx) puede alcanzarla, por la red interna de Docker.
+  back:
     build:
       context: ./backend
       target: produccion
@@ -39,7 +40,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       SESSION_SECRET: ${SESSION_SECRET:?Defina SESSION_SECRET (mínimo 32 caracteres en qa y production)}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      TRUST_PROXY: ${TRUST_PROXY:-0}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       SEED_CATALOGO: ${SEED_CATALOGO:-false}
       SEED_USUARIOS_DEMO: ${SEED_USUARIOS_DEMO:-false}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
@@ -49,6 +50,14 @@ services:
       AWS_REGION: ${AWS_REGION:-us-east-1}
     volumes:
       - uploads:/app/uploads # imágenes del panel (driver local); persisten entre reinicios
+
+  # Sitio web: Nginx sirve los archivos estáticos y reenvía /api, /media y /salud a "back". Es el ÚNICO punto de entrada.
+  front:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - back
 
 volumes:
   dbdata:

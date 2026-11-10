@@ -7,7 +7,7 @@ Todo se crea con **CloudFormation** (`infra/pnk-stack.yaml`) y se orquesta con *
 
 ```
  Internet ──► Application Load Balancer (HTTP :80) ──► Auto Scaling Group (2 a 4 EC2 t3.small, 2 zonas)
-                  salud: GET /salud                          cada una ejecuta el contenedor de la app (imagen en ECR)
+                  salud: GET /salud                          cada una ejecuta 2 contenedores: Nginx (frontend) → API (backend); imágenes en ECR
                                                                          │ TLS verificado
                                                                          ▼
                                                           Amazon RDS PostgreSQL 17 (subredes privadas, sin acceso público)
@@ -20,9 +20,9 @@ Todo se crea con **CloudFormation** (`infra/pnk-stack.yaml`) y se orquesta con *
 | **ALB** | recibe HTTP :80, comprueba `/salud` cada 15 s y saca del servicio a la instancia que no responde |
 | **Auto Scaling Group** | mínimo 2, máximo 4 instancias; escala por **peticiones por instancia** (> 300/min) y por **CPU** (> 55 %); reemplaza instancias enfermas; actualiza imágenes con *rolling update* |
 | **S3** | bucket **privado** (cifrado, sin acceso público, sólo HTTPS) con las imágenes que el administrador sube desde `/admin`; lo comparten todas las instancias |
-| **ECR** | repositorio `cartapnk` con la imagen Docker (la crea el script) |
+| **ECR** | repositorio `cartapnk` con las 2 imágenes Docker: `back-<tag>` (API) y `front-<tag>` (Nginx + sitio web); lo crea el script |
 
-Cadena de grupos de seguridad: `Internet → ALB (80) → app (3000, sólo desde el ALB) → RDS (5432, sólo desde la app)`.
+Cadena de grupos de seguridad: `Internet → ALB (80) → instancia: Nginx (80, sólo desde el ALB) → API (3000, red interna de Docker, sin puerto publicado) → RDS (5432, sólo desde la instancia)`.
 
 Las instancias no guardan estado: **sesiones, carrito y contadores del límite de login viven en PostgreSQL y las imágenes en S3**, por eso se puede añadir o quitar instancias sin que nadie pierda su sesión.
 
@@ -91,7 +91,7 @@ Si alguno responde `AccessDenied` / `not authorized`, esa capacidad no está hab
 El script, en orden:
 
 1. genera y guarda **secretos aleatorios** (contraseña de la base, secreto de sesión, contraseña del administrador) en `.despliegue/secretos.env` (no se sube a Git; se reutilizan en cada ejecución);
-2. crea el repositorio **ECR**, **construye** la imagen (`--target produccion`) y la **sube**;
+2. crea el repositorio **ECR**, **construye** las dos imágenes (`backend/` con `--target produccion` y `frontend/`) y las **sube**;
 3. ejecuta `aws cloudformation deploy` con la plantilla;
 4. espera a que el balanceador marque las instancias como *healthy* y le imprime la **URL**, el administrador y su contraseña (se muestra solo la primera vez).
 
@@ -121,7 +121,7 @@ Imprime una URL `https://<palabras>.trycloudflare.com` (déjela abierta; `Ctrl+C
 
 Con un **dominio propio** (HTTPS de extremo a extremo: Cloudflare → ALB con certificado de ACM, modo *Full (strict)*): siga [`docs/DOMINIO-CLOUDFLARE.md`](DOMINIO-CLOUDFLARE.md). El script automatiza el certificado (`./scripts/desplegar.sh certificado menu.sudominio.com`) y la activación de HTTPS (`up --sin-build`).
 
-`TRUST_PROXY=2` (balanceador + Cloudflare) ya viene configurado para que el límite de login use la IP real del visitante.
+`TRUST_PROXY=3` (Nginx del frontend + balanceador + Cloudflare) ya viene configurado para que el límite de login use la IP real del visitante.
 
 ### 3.6 Demostrar el Auto Scaling y la alta disponibilidad
 
@@ -149,7 +149,7 @@ Después de un `git pull` con cambios:
 ./scripts/desplegar.sh up
 ```
 
-Construye una imagen nueva (etiqueta distinta), la sube y CloudFormation **reemplaza las instancias de a una** (rolling update). Para reutilizar la última imagen sin reconstruir: `up --sin-build`.
+Construye imágenes nuevas (etiqueta distinta), las sube y CloudFormation **reemplaza las instancias de a una** (rolling update). Para reutilizar la última imagen sin reconstruir: `up --sin-build`.
 
 ### 3.8 Destruir todo
 
@@ -162,7 +162,7 @@ Tarda ~10 minutos. **Elimina la base de datos y sus datos.**
 
 ## 4. Qué hace la aplicación al arrancar en cada instancia
 
-1. `user-data` instala Docker, escribe `/etc/pnk.env` (sólo root puede leerlo), inicia sesión en ECR, descarga la imagen y ejecuta el contenedor (`--read-only`, sin capacidades de Linux, con límite de memoria).
+1. `user-data` instala Docker, escribe `/etc/pnk.env` (sólo root puede leerlo), inicia sesión en ECR, descarga las imágenes y ejecuta los contenedores `back` (API) y `front` (Nginx, publicado en el puerto 80) en una red de Docker propia (`--read-only`, sin capacidades de Linux, con límite de memoria).
 2. `docker/entrypoint.sh` aplica las **migraciones** (con bloqueo asesor: si dos instancias arrancan a la vez, una espera a la otra) y carga el catálogo y el administrador una sola vez.
 3. La app se conecta a RDS con **TLS verificado** contra el certificado raíz de AWS (incluido en la imagen) y empieza a responder `/salud`; el balanceador la incorpora tras dos comprobaciones correctas.
 

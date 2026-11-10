@@ -50,7 +50,6 @@ COPY --from=deps-produccion /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
 COPY db ./db
-COPY public ./public
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
 # Certificado raíz de Amazon RDS (para conectarse con TLS verificado: DB_SSL=true). Si la descarga falla, el build falla.
 RUN mkdir -p db/certs \

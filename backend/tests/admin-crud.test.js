@@ -153,7 +153,7 @@ describe('panel: validación y subidas hostiles', () => {
     const antes = (await query('SELECT count(*)::int AS n FROM restaurantes')).rows[0].n;
     const res = await multipart(agente.post('/api/admin/restaurantes'), token, { ...RESTAURANTE, nombre: '', rut: '<script>', email: 'no-es-correo' });
     expect(res.status).toBe(422);
-    expect(res.body.errores.nombre).toBe('El nombre es obligatorio');
+    expect(res.body.errores.nombre).toBe('El nombre: campo obligatorio');
     expect(res.body.errores.rut).toContain('El RUT sólo admite');
     expect(res.body.errores.email).toBeDefined();
     expect((await query('SELECT count(*)::int AS n FROM restaurantes')).rows[0].n).toBe(antes);

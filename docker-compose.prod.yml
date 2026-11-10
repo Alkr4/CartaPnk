@@ -11,11 +11,8 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
-  app:
-    # APP_BIND=127.0.0.1 cuando se usa Cloudflare Tunnel (la app no se expone a Internet);
-    # APP_BIND=0.0.0.0 y APP_PORT=80 cuando Cloudflare enruta hacia la IP pública del servidor.
-    ports:
-      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-3000}:3000"
+  back:
+    # la API NO publica puertos: sólo el frontend (Nginx) la alcanza por la red interna
     read_only: true
     tmpfs:
       - /tmp
@@ -29,7 +26,25 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
-  # Túnel saliente de Cloudflare (opcional): publica la app sin abrir puertos en el Security Group de AWS.
+  front:
+    # APP_BIND=127.0.0.1 cuando se usa Cloudflare Tunnel (el sitio no se expone a Internet);
+    # APP_BIND=0.0.0.0 y APP_PORT=80 cuando Cloudflare enruta hacia la IP pública del servidor.
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-3000}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Túnel saliente de Cloudflare (opcional): publica el sitio sin abrir puertos en el Security Group de AWS.
   #   docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f docker-compose.prod.yml --profile tunnel up -d
   cloudflared:
     profiles: ["tunnel"]
@@ -41,6 +56,6 @@ services:
       # Sin token, cloudflared falla al arrancar con un mensaje claro: complételo en env/prod.env antes de usar --profile tunnel.
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
     depends_on:
-      - app
+      - front
     security_opt:
       - no-new-privileges:true

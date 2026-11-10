@@ -100,15 +100,15 @@ pipeline {
     // ---------------------------------------------------------------- DAST sobre QA
     stage('Desplegar QA y DAST (OWASP ZAP)') {
       steps {
-        sh '$COMPOSE_QA up -d --build app db'
+        sh '$COMPOSE_QA up -d --build back front db'
         sh '''
           # esperar a que la app responda dentro de la red de Docker del proyecto
           for i in $(seq 1 30); do
-            docker run --rm --network ${PROY_QA}_default curlimages/curl -fsS http://app:3000/salud && break || sleep 3
+            docker run --rm --network ${PROY_QA}_default curlimages/curl -fsS http://front:8080/salud && break || sleep 3
           done
           # escaneo pasivo (baseline); las reglas con FAIL en jenkins/zap-reglas.tsv rompen el build
           docker run --rm --network ${PROY_QA}_default -v "$PWD/reportes":/zap/wrk:rw -v "$PWD/jenkins":/zap/config:ro \
-            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://app:3000/restaurantes/1 \
+            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://front:8080/restaurantes/1 \
             -c /zap/config/zap-reglas.tsv -r zap-baseline.html -J zap-baseline.json
         '''
       }

@@ -48,8 +48,8 @@ const config = {
   esProduccion: ambiente === 'production',
   esTest: ambiente === 'test',
   puerto: entero('PORT', 3000),
-  // Nº de proxys confiables delante de la app (Cloudflare / Cloudflare Tunnel = 1). Necesario para req.ip y req.secure.
-  trustProxy: process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) || false : (ambiente === 'production' ? 1 : false),
+  // Nº de proxys confiables delante de la API. Siempre hay al menos uno: el Nginx del frontend (más Cloudflare / el balanceador si existen). Necesario para req.ip y req.secure.
+  trustProxy: process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) || false : (ambiente === 'test' ? false : 1),
   db: {
     host: obligatoria('DB_HOST', 'localhost'),
     port: entero('DB_PORT', 5432),

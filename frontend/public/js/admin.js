@@ -319,7 +319,7 @@
       h('button', { type: 'submit', class: 'btn btn-dark w-100' }, 'Ingresar'));
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      var cuerpo = { email: form.email.value, password: form.password.value };
+      var cuerpo = { email: form.querySelector('#email').value, password: form.querySelector('#password').value };
       P.api('POST', '/admin/login', cuerpo).then(function (r) {
         // la sesión se renueva al entrar: se pide el token CSRF nuevo
         P.fijarCsrf(r.csrfToken);
