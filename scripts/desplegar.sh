@@ -8,6 +8,7 @@
 #   ./scripts/desplegar.sh url                imprime la URL pública
 #   ./scripts/desplegar.sh certificado <dom>  pide un certificado de ACM para su dominio (HTTPS propio; validación DNS en Cloudflare)
 #   ./scripts/desplegar.sh dominio [<dom>]    imprime qué crear en Cloudflare (registros CNAME y modo SSL) y comprueba si el dominio ya funciona
+#   ./scripts/desplegar.sh cloudflare [<dom>] [--reemplazar]  crea/corrige los DNS en Cloudflare (API) y aplica ajustes de la zona; requiere CLOUDFLARE_API_TOKEN
 #   ./scripts/desplegar.sh tunel              publica la URL con un túnel TEMPORAL de Cloudflare (trycloudflare.com)
 #   ./scripts/desplegar.sh carga              genera tráfico para demostrar el Auto Scaling
 #   ./scripts/desplegar.sh down [--ecr]       DESTRUYE la infraestructura (pide confirmación; --ecr borra también las imágenes)
@@ -316,20 +317,38 @@ cmd_certificado() {
   printf '   Proxy status:   DNS only  (nube GRIS, sin proxy)\n'
   printf '%s==============================================================================%s\n' "${NEGRITA}" "${FIN}"
   echo
+  if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
+    paso "Creando el registro de validación en Cloudflare con su token (automático)"
+    cf_zona "${dominio}"
+    cf_registro CNAME "${nombre%.}" "${valor%.}" false
+  else
+    aviso "Sin CLOUDFLARE_API_TOKEN: cree el registro a mano (o automatice: ver docs/DOMINIO-CLOUDFLARE.md, 'Automatizar con la API')."
+  fi
   paso "Esperando la validación (2-10 min después de crear el registro; Ctrl+C para salir y volver a ejecutar este comando luego)"
   aws acm wait certificate-validated --certificate-arn "${arn}"
   ok "certificado EMITIDO: ${arn}"
   echo
   echo "Siguiente paso:  ./scripts/desplegar.sh up --sin-build      (activa HTTPS en el balanceador); luego ./scripts/desplegar.sh dominio ${dominio} te dice qué crear en Cloudflare"
-  echo "Después, en Cloudflare:  DNS → CNAME  ${dominio%%.*}  →  $(salida_pila LoadBalancerDns 2>/dev/null || echo '<DNS del balanceador>')  (nube NARANJA, con proxy)"
-  echo "                         SSL/TLS → Overview → modo 'Full (strict)'"
+  echo "Después:  ./scripts/desplegar.sh cloudflare ${dominio}     (crea/corrige el CNAME del sitio y los ajustes de la zona; requiere CLOUDFLARE_API_TOKEN)"
 }
 
-# Imprime TODO lo que hay que crear/configurar en Cloudflare para el dominio, con los valores de ESTA cuenta de AWS, y comprueba
-# el estado (certificado, HTTPS del balanceador, respuesta real del dominio). No crea nada en AWS: se puede ejecutar las veces que quiera.
-cmd_dominio() {
+# Pide https://<dominio>/salud y explica el resultado (código HTTP de Cloudflare / del sitio).
+comprobar_dominio() {
+  local dominio="$1"
+  local codigo
+  codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://${dominio}/salud" 2>/dev/null || true)"
+  case "${codigo}" in
+    200) ok "https://${dominio}/salud responde 200: el dominio ya funciona" ;;
+    000|"") aviso "https://${dominio} todavía no responde (DNS sin crear/propagar, o el sitio no está desplegado)" ;;
+    525|526) falla "Cloudflare responde ${codigo}: revise el modo SSL (Full strict) y que el balanceador ya use el certificado (up --sin-build)" ;;
+    522|523|524) falla "Cloudflare responde ${codigo}: el CNAME apunta a un balanceador que no existe o no responde (¿DNS del balanceador antiguo?)" ;;
+    *) aviso "https://${dominio}/salud respondió ${codigo}" ;;
+  esac
+}
+
+# Deja en DOMINIO y ARN_CERT el dominio y el certificado de ACM a usar: el indicado, o el guardado / único de la cuenta.
+resolver_certificado() {
   local dominio="${1:-}" arn=""
-  requisitos
   if [ -n "${dominio}" ]; then
     [[ "${dominio}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?\.[a-zA-Z]{2,}$ ]] || die "Dominio no válido: ${dominio}"
     arn="$(aws acm list-certificates --query "CertificateSummaryList[?DomainName=='${dominio}'].CertificateArn | [0]" --output text 2>/dev/null || true)"
@@ -347,6 +366,17 @@ cmd_dominio() {
   [ -n "${arn}" ] && [ "${arn}" != "None" ] || die "Esta cuenta de AWS no tiene un certificado para ${dominio}. Los certificados no pasan de una cuenta a otra: ejecute primero ./scripts/desplegar.sh certificado ${dominio}"
   mkdir -p "${ESTADO}"
   echo "${arn}" > "${CERT_FILE}"
+
+  DOMINIO="${dominio}"
+  ARN_CERT="${arn}"
+}
+
+# Imprime TODO lo que hay que crear/configurar en Cloudflare para el dominio, con los valores de ESTA cuenta de AWS, y comprueba
+# el estado (certificado, HTTPS del balanceador, respuesta real del dominio). No crea nada en AWS: se puede ejecutar las veces que quiera.
+cmd_dominio() {
+  requisitos
+  resolver_certificado "${1:-}"
+  local dominio="${DOMINIO}" arn="${ARN_CERT}"
 
   paso "Configuración de Cloudflare para ${dominio}  (cuenta ${CUENTA}, región ${REGION})"
   local estado nombre valor
@@ -394,15 +424,128 @@ cmd_dominio() {
   elif [ "${estado}" = "ISSUED" ] && [ -n "${lb}" ]; then
     aviso "el certificado está listo pero el balanceador aún no usa HTTPS: ejecute ./scripts/desplegar.sh up --sin-build"
   fi
-  local codigo
-  codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://${dominio}/salud" 2>/dev/null || true)"
-  case "${codigo}" in
-    200) ok "https://${dominio}/salud responde 200: el dominio ya funciona" ;;
-    000|"") aviso "https://${dominio} todavía no responde (DNS sin crear/propagar, o el sitio no está desplegado)" ;;
-    525|526) falla "Cloudflare responde ${codigo}: revise el modo SSL (Full strict) y que el balanceador ya use el certificado (up --sin-build)" ;;
-    522|523|524) falla "Cloudflare responde ${codigo}: el CNAME apunta a un balanceador que no existe o no responde (¿DNS del balanceador antiguo?)" ;;
-    *) aviso "https://${dominio}/salud respondió ${codigo}" ;;
-  esac
+  comprobar_dominio "${dominio}"
+}
+
+# ------------------------------------------------------------------------------------------------ Cloudflare (API)
+# Automatiza lo que antes se hacía a mano en el panel de Cloudflare: registros DNS y ajustes de la zona.
+# Necesita un token de API limitado a SU zona (ver docs/DOMINIO-CLOUDFLARE.md, sección "Automatizar con la API").
+# Por decisión de diseño NO aplica reglas WAF, rate limiting ni Cloudflare Access (ver docs/PANEL-ADMIN.md): dependen de su IP y de su cuenta.
+CF_API="https://api.cloudflare.com/client/v4"
+
+# cf METODO RUTA [JSON] -> imprime la respuesta JSON. El token viaja por stdin (-K -): no queda en la lista de procesos ni en el historial.
+cf() {
+  local metodo="$1" ruta="$2" cuerpo="${3:-}"
+  local args=(-sS --max-time 30 -X "${metodo}" -K - -H "Content-Type: application/json")
+  [ -z "${cuerpo}" ] || args+=(--data "${cuerpo}")
+  printf 'header = "Authorization: Bearer %s"\n' "${CF_TOKEN}" | curl "${args[@]}" "${CF_API}${ruta}"
+}
+cf_ok() { grep -Eq '"success": ?true' <<<"$1"; }
+cf_error() { sed -n 's/.*"message": \{0,1\}"\([^"]*\)".*/\1/p' <<<"$1" | head -n 1; }
+
+# Valida el token y obtiene el id de la zona (el dominio raíz: cartapnk.xyz). Deja ZONA_ID y ZONA_NOMBRE.
+cf_zona() {
+  local dominio="$1" zona="${PNK_CF_ZONA:-}" r
+  [ -n "${CLOUDFLARE_API_TOKEN:-}" ] || die "Falta el token de Cloudflare: export CLOUDFLARE_API_TOKEN=...   (cómo crearlo: docs/DOMINIO-CLOUDFLARE.md, sección 'Automatizar con la API')"
+  CF_TOKEN="${CLOUDFLARE_API_TOKEN}"
+  # zona = las dos últimas etiquetas (cartapnk.xyz). Para dominios del tipo midominio.co.uk indique PNK_CF_ZONA=midominio.co.uk
+  if [ -z "${zona}" ]; then zona="$(awk -F. '{ print $(NF-1) "." $NF }' <<<"${dominio}")"; fi
+  r="$(cf GET "/user/tokens/verify" || true)"
+  cf_ok "${r}" || die "Cloudflare no aceptó el token: $(cf_error "${r}")"
+  r="$(cf GET "/zones?name=${zona}" || true)"
+  cf_ok "${r}" || die "Cloudflare rechazó la consulta de la zona ${zona}: $(cf_error "${r}"). El token necesita el permiso Zone → DNS → Edit sobre esa zona."
+  ZONA_ID="$(sed -n 's/.*"result": \{0,1\}\[{"id": \{0,1\}"\([a-f0-9]\{32\}\)".*/\1/p' <<<"${r}")"
+  [ -n "${ZONA_ID}" ] || die "El token no ve la zona '${zona}'. ¿Está agregado el dominio a Cloudflare y el token tiene acceso a esa zona? (¿Dominio tipo .co.uk? use PNK_CF_ZONA)"
+  ZONA_NOMBRE="${zona}"
+  ok "token de Cloudflare válido; zona ${ZONA_NOMBRE} (${ZONA_ID})"
+}
+
+# cf_registro TIPO NOMBRE CONTENIDO PROXIED [--reemplazar]
+# Idempotente: si ya existe un registro con ese nombre y el mismo tipo, lo ACTUALIZA (así se corrige el destino cuando cambia el balanceador);
+# si no existe, lo crea. Si existe otro de distinto tipo (p. ej. un A de estacionamiento del registrador) se detiene, salvo con --reemplazar.
+cf_registro() {
+  local tipo="$1" nombre="$2" contenido="$3" proxied="$4" reemplazar="${5:-}"
+  [[ "${nombre}" =~ ^[a-zA-Z0-9_.-]+$ ]] && [[ "${contenido}" =~ ^[a-zA-Z0-9_.-]+$ ]] || die "Valores no válidos para el registro DNS (${nombre} → ${contenido})"
+  local r id existente cuerpo
+  r="$(cf GET "/zones/${ZONA_ID}/dns_records?name=${nombre}" || true)"
+  cf_ok "${r}" || die "No se pudo consultar el DNS de Cloudflare: $(cf_error "${r}")"
+  id="$(sed -n 's/.*"result": \{0,1\}\[{"id": \{0,1\}"\([a-f0-9]\{32\}\)".*/\1/p' <<<"${r}")"
+  existente="$(sed -n 's/.*"result": \{0,1\}\[{[^}]*"type": \{0,1\}"\([A-Z]*\)".*/\1/p' <<<"${r}")"
+  cuerpo="{\"type\":\"${tipo}\",\"name\":\"${nombre}\",\"content\":\"${contenido}\",\"ttl\":1,\"proxied\":${proxied}}"
+
+  if [ -n "${id}" ] && [ "${existente}" != "${tipo}" ]; then
+    if [ "${reemplazar}" = "--reemplazar" ]; then
+      r="$(cf DELETE "/zones/${ZONA_ID}/dns_records/${id}" || true)"
+      cf_ok "${r}" || die "No se pudo borrar el registro ${existente} de ${nombre}: $(cf_error "${r}")"
+      aviso "se borró el registro ${existente} existente de ${nombre} (--reemplazar)"
+      id=""
+    else
+      die "Ya existe un registro ${existente} para ${nombre} en Cloudflare y no es CNAME. Bórrelo en el panel (DNS → Records) o vuelva a ejecutar con --reemplazar."
+    fi
+  fi
+  if [ -n "${id}" ]; then
+    r="$(cf PUT "/zones/${ZONA_ID}/dns_records/${id}" "${cuerpo}" || true)"
+    cf_ok "${r}" || die "No se pudo actualizar ${nombre}: $(cf_error "${r}")"
+    ok "DNS actualizado: ${nombre} → ${contenido}  (proxy: ${proxied})"
+  else
+    r="$(cf POST "/zones/${ZONA_ID}/dns_records" "${cuerpo}" || true)"
+    cf_ok "${r}" || die "No se pudo crear ${nombre}: $(cf_error "${r}")"
+    ok "DNS creado: ${nombre} → ${contenido}  (proxy: ${proxied})"
+  fi
+}
+
+# cf_ajuste ID VALOR  -> ajuste de la zona (SSL/TLS, HTTPS, TLS mínimo…). Un fallo no detiene el script: se informa al final.
+CF_AJUSTES_FALLIDOS=0
+cf_ajuste() {
+  local id="$1" valor="$2" r
+  r="$(cf PATCH "/zones/${ZONA_ID}/settings/${id}" "{\"value\":\"${valor}\"}" || true)"
+  if cf_ok "${r}"; then ok "ajuste ${id} = ${valor}"; else falla "ajuste ${id}: $(cf_error "${r}")"; CF_AJUSTES_FALLIDOS=$((CF_AJUSTES_FALLIDOS + 1)); fi
+}
+
+# Configura Cloudflare para el dominio: CNAME de validación del certificado (si aún no está emitido), CNAME del sitio hacia el
+# balanceador (crea o corrige el destino) y los ajustes de seguridad de la zona. Se puede repetir sin problema.
+cmd_cloudflare() {
+  local dominio="" reemplazar=""
+  for a in "$@"; do case "${a}" in --reemplazar) reemplazar="--reemplazar" ;; -*) die "Opción desconocida: ${a}" ;; *) dominio="${a}" ;; esac; done
+  requisitos
+  resolver_certificado "${dominio}"
+  dominio="${DOMINIO}"
+  paso "Configurando Cloudflare para ${dominio} mediante su API"
+  cf_zona "${dominio}"
+
+  local estado nombre valor lb
+  estado="$(aws acm describe-certificate --certificate-arn "${ARN_CERT}" --query Certificate.Status --output text)"
+  if [ "${estado}" != "ISSUED" ]; then
+    nombre="$(aws acm describe-certificate --certificate-arn "${ARN_CERT}" --query 'Certificate.DomainValidationOptions[0].ResourceRecord.Name' --output text 2>/dev/null || true)"
+    valor="$(aws acm describe-certificate --certificate-arn "${ARN_CERT}" --query 'Certificate.DomainValidationOptions[0].ResourceRecord.Value' --output text 2>/dev/null || true)"
+    if [ -n "${nombre}" ] && [ "${nombre}" != "None" ]; then
+      cf_registro CNAME "${nombre%.}" "${valor%.}" false "${reemplazar}"
+      aviso "certificado ${estado}: ACM tarda 2-10 min en validarlo (./scripts/desplegar.sh certificado ${dominio} espera hasta que quede emitido)"
+    else
+      aviso "ACM aún no entregó el registro de validación: ejecute ./scripts/desplegar.sh certificado ${dominio}"
+    fi
+  else
+    ok "certificado ya emitido: no hace falta crear el registro de validación"
+  fi
+
+  lb="$(salida_pila LoadBalancerDns 2>/dev/null || true)"
+  if [ -n "${lb}" ] && [ "${lb}" != "None" ]; then
+    cf_registro CNAME "${dominio}" "${lb}" true "${reemplazar}"
+  else
+    aviso "no hay pila desplegada: se omite el CNAME del sitio. Ejecute ./scripts/desplegar.sh up y luego repita este comando."
+  fi
+
+  paso "Ajustes de seguridad de la zona"
+  cf_ajuste ssl strict                 # Cloudflare ↔ balanceador cifrado y con el certificado VERIFICADO (Full strict)
+  cf_ajuste always_use_https on        # redirige HTTP → HTTPS
+  cf_ajuste min_tls_version 1.2        # rechaza TLS 1.0/1.1
+  cf_ajuste rocket_loader off          # inyecta scripts: la CSP (script-src 'self') los bloquearía
+  [ "${CF_AJUSTES_FALLIDOS}" -eq 0 ] || aviso "${CF_AJUSTES_FALLIDOS} ajuste(s) fallaron: el token necesita también el permiso Zone → Zone Settings → Edit."
+
+  paso "Estado actual"
+  comprobar_dominio "${dominio}"
+  echo
+  aviso "NO se aplicó ninguna protección de /admin (WAF, rate limiting, Cloudflare Access): ver docs/PANEL-ADMIN.md (qué son, por qué importan y por qué no están activadas)."
 }
 
 cmd_tunel() {
@@ -453,7 +596,7 @@ cmd_down() {
   fi
 }
 
-uso() { sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+uso() { sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 main() {
   local cmd="${1:-}"; shift || true
@@ -467,6 +610,7 @@ main() {
     down) cmd_down "$@" ;;
     certificado) cmd_certificado "$@" ;;
     dominio) cmd_dominio "$@" ;;
+    cloudflare) cmd_cloudflare "$@" ;;
     ""|-h|--help|help) uso ;;
     *) uso; die "Comando desconocido: ${cmd}" ;;
   esac

@@ -72,7 +72,9 @@ curl -s "$(./scripts/desplegar.sh url)/salud"        # {"estado":"ok",...}
 ```
 
 ### 2.6 Apuntar el dominio al balanceador nuevo (¡siempre cambia!)
-> **Atajo:** `./scripts/desplegar.sh dominio cartapnk.xyz` imprime los dos registros de Cloudflare con los valores de **esta** cuenta (validación
+> **Automático:** con `export CLOUDFLARE_API_TOKEN=...` basta `./scripts/desplegar.sh cloudflare cartapnk.xyz` (crea/corrige el CNAME y los ajustes de la zona; ver `docs/DOMINIO-CLOUDFLARE.md`, sección 5b).
+>
+> **Atajo manual:** `./scripts/desplegar.sh dominio cartapnk.xyz` imprime los dos registros de Cloudflare con los valores de **esta** cuenta (validación
 > del certificado y CNAME hacia el balanceador), el modo SSL, y comprueba si `https://cartapnk.xyz/salud` ya responde. Úselo al terminar el paso 2.4 y
 > en cualquier momento para saber qué falta.
 

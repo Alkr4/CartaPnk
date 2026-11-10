@@ -107,6 +107,48 @@ curl -sI https://cartapnk.xyz/ | grep -iE "^(cf-ray|strict-transport|content-sec
 
 Debe verse `cf-ray` (pasó por Cloudflare), `strict-transport-security` y la cookie `pnk.sid` con `Secure; HttpOnly; SameSite=Lax`. Entre a `https://cartapnk.xyz/admin` con el administrador.
 
+## 5b. Automatizar Cloudflare con la API (opcional)
+
+Todo lo de las secciones 3 y 5 (crear los registros DNS y ajustar la zona) puede hacerlo el script con la **API de Cloudflare**, usando un **token**
+que usted crea una sola vez. Con una cuenta de AWS nueva el trámite completo se reduce a:
+
+```bash
+export CLOUDFLARE_API_TOKEN=...                      # el token (no se guarda en ningún archivo ni en Git)
+./scripts/desplegar.sh certificado cartapnk.xyz      # ahora crea SOLO el CNAME de validación en Cloudflare y espera
+./scripts/desplegar.sh up
+./scripts/desplegar.sh cloudflare cartapnk.xyz       # CNAME del sitio → balanceador nuevo + ajustes de la zona
+```
+
+### Crear el token (2 minutos, una vez)
+
+1. Cloudflare → icono de su perfil → **My Profile → API Tokens → Create Token → Create Custom Token**.
+2. **Permissions** (3 filas): `Zone` · `DNS` · `Edit`   y   `Zone` · `Zone Settings` · `Edit`   y   `Zone` · `Zone` · `Read`.
+3. **Zone Resources**: `Include` → `Specific zone` → **cartapnk.xyz** (así el token no puede tocar ninguna otra zona).
+4. *(Recomendado)* **TTL**: fecha de vencimiento (p. ej. el día después de la entrega) y, si quiere, **Client IP Address Filtering**.
+5. **Continue to summary → Create Token** y copie el valor (se muestra **una sola vez**).
+
+### Qué hace `./scripts/desplegar.sh cloudflare [dominio] [--reemplazar]`
+
+| Acción | Detalle |
+|---|---|
+| Comprueba el token y la zona | Falla con un mensaje claro si el token no existe, venció o no ve la zona. |
+| Registro de validación del certificado | CNAME *DNS only* hacia ACM; sólo si el certificado aún no está emitido. |
+| CNAME del sitio | `cartapnk.xyz` → DNS del balanceador, *Proxied*. **Si ya existe lo actualiza** (así se corrige solo cuando el balanceador cambia). |
+| Ajustes de la zona | SSL/TLS **Full (strict)**, *Always Use HTTPS*, TLS mínimo **1.2**, *Rocket Loader* **apagado**. |
+| Verificación | Pide `https://dominio/salud` y explica el resultado (200, 522, 525…). |
+
+Es **idempotente**: puede ejecutarlo las veces que quiera. Si existe un registro de otro tipo con el mismo nombre (p. ej. un `A` de "estacionamiento" que pone el
+registrador), se detiene y se lo dice; con `--reemplazar` lo borra y crea el CNAME.
+
+Para dominios con sufijo compuesto (`midominio.co.uk`) indique la zona: `PNK_CF_ZONA=midominio.co.uk ./scripts/desplegar.sh cloudflare midominio.co.uk`.
+
+### Seguridad del token (qué decir al profesor)
+
+- Es una **credencial**: quien la tenga puede cambiar el DNS del dominio. Por eso se limita a **una zona**, con los **permisos mínimos** y fecha de vencimiento.
+- Viaja sólo por **variable de entorno** (en CloudShell desaparece al cerrar la sesión) y por **stdin** hacia `curl` (`-K -`): no aparece en la lista de procesos ni en el historial.
+- **Nunca** se escribe en el repositorio. Si se filtrara: Cloudflare → API Tokens → **Roll** (cambia el valor) o **Delete**.
+- Lo que el script **no** automatiza a propósito: reglas WAF, *rate limiting* y *Cloudflare Access* (ver `docs/PANEL-ADMIN.md`: qué son, por qué importan y por qué no están activadas).
+
 ## 6. Plan B: Cloudflare en modo *Flexible* (sin ACM)
 
 Si su cuenta no permite ACM: haga sólo el paso 5 con **SSL/TLS = Flexible** (Cloudflare habla HTTPS con el navegador y HTTP con el balanceador). La plantilla se queda como está (`COOKIE_SECURE=false`), porque el balanceador sólo ve HTTP. Es menos seguro: el tramo Cloudflare → AWS no va cifrado.
