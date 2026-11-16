@@ -20,8 +20,8 @@ echo "APP_PORT=3010" >> env/dev.env      # dev en el 3010 para no chocar con pro
 # DESARROLLO  (código montado como volumen, recarga automática)
 docker compose -p pnk-dev --env-file env/dev.env -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
-# QA  (misma imagen que producción; sólo app + base, sin el contenedor de pruebas)
-docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up -d --build app db
+# QA  (misma imagen que producción; sólo sitio (front + back) + base, sin el contenedor de pruebas)
+docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up -d --build back front db
 
 # PRODUCCIÓN  (si ya está levantada, no hace falta repetir)
 docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f docker-compose.prod.yml up -d --build
@@ -32,7 +32,7 @@ docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f dock
 ```bash
 for amb in dev qa prod; do
   docker rm -f tunel-$amb 2>/dev/null
-  docker run -d --name tunel-$amb --network pnk-${amb}_default cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://app:3000
+  docker run -d --name tunel-$amb --network pnk-${amb}_default cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://front:8080
 done
 sleep 8
 for amb in dev qa prod; do

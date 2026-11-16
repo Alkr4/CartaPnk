@@ -6,9 +6,13 @@ Description: >-
 
 # ---------------------------------------------------------------------------------------------------------------------
 Parameters:
-  ImageUri:
+  BackImageUri:
     Type: String
-    Description: URI completa de la imagen en ECR, con etiqueta (p. ej. 123456789012.dkr.ecr.us-east-1.amazonaws.com/cartapnk:abc123)
+    Description: Imagen de la API (backend) en ECR, con etiqueta (p. ej. 123456789012.dkr.ecr.us-east-1.amazonaws.com/cartapnk:back-abc123)
+    AllowedPattern: '^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9._/-]+:[A-Za-z0-9._-]+$'
+  FrontImageUri:
+    Type: String
+    Description: Imagen del sitio web (frontend, Nginx) en ECR, con etiqueta (p. ej. 123456789012.dkr.ecr.us-east-1.amazonaws.com/cartapnk:front-abc123)
     AllowedPattern: '^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9._/-]+:[A-Za-z0-9._-]+$'
   DbPassword:
     Type: String
@@ -88,10 +92,10 @@ Parameters:
       porque el balanceador reescribe X-Forwarded-Proto a "http" y la cookie Secure no se emitiría.
   TrustProxy:
     Type: Number
-    Default: 2
+    Default: 3
     MinValue: 0
     MaxValue: 5
-    Description: Proxys de confianza delante de la app (balanceador + Cloudflare = 2; sólo balanceador = 1)
+    Description: Proxys de confianza delante de la API (Nginx del frontend + balanceador + Cloudflare = 3; sin Cloudflare = 2)
   SeedCatalogo:
     Type: String
     Default: "true"
@@ -218,7 +222,7 @@ Resources:
       GroupDescription: Aplicacion - solo recibe trafico del balanceador
       VpcId: !Ref Vpc
       SecurityGroupIngress:
-        - { IpProtocol: tcp, FromPort: 3000, ToPort: 3000, SourceSecurityGroupId: !Ref AlbSecurityGroup, Description: App desde el ALB }
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, SourceSecurityGroupId: !Ref AlbSecurityGroup, Description: Frontend (Nginx) desde el ALB }
       Tags: [{ Key: Name, Value: cartapnk-app-sg }]
 
   DbSecurityGroup:
@@ -281,10 +285,10 @@ Resources:
     Properties:
       VpcId: !Ref Vpc
       Protocol: HTTP
-      Port: 3000
+      Port: 80 # el balanceador habla con el Nginx del frontend de cada instancia
       TargetType: instance
       HealthCheckProtocol: HTTP
-      HealthCheckPath: /salud # la app responde 200 sólo si logra consultar la base de datos
+      HealthCheckPath: /salud # Nginx lo reenvía a la API, que responde 200 sólo si logra consultar la base de datos
       HealthCheckIntervalSeconds: 15
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
@@ -398,14 +402,22 @@ Resources:
                 ENV
                 umask 022
 
-                # descargar y ejecutar la imagen (las migraciones corren solas al arrancar, con bloqueo entre instancias)
+                # descargar y ejecutar las imágenes (las migraciones corren solas al arrancar la API, con bloqueo entre instancias)
                 aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${Registry}
-                docker pull ${ImageUri}
-                docker rm -f pnk 2>/dev/null || true
-                docker run -d --name pnk --restart always -p 3000:3000 --env-file /etc/pnk.env \
+                docker pull ${BackImageUri}
+                docker pull ${FrontImageUri}
+                docker rm -f front back 2>/dev/null || true
+                docker network inspect pnk >/dev/null 2>&1 || docker network create pnk
+
+                # API: sin puertos publicados; sólo el frontend la alcanza, por la red interna "pnk" (nombre de host: back)
+                docker run -d --name back --network pnk --restart always --env-file /etc/pnk.env \
                   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 1g \
-                  --log-opt max-size=10m --log-opt max-file=3 ${ImageUri}
-              - Registry: !Select [0, !Split ["/", !Ref ImageUri]]
+                  --log-opt max-size=10m --log-opt max-file=3 ${BackImageUri}
+                # Sitio web (Nginx): único punto de entrada; el balanceador le envía el tráfico al puerto 80
+                docker run -d --name front --network pnk --restart always -p 80:8080 \
+                  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 192m \
+                  --log-opt max-size=10m --log-opt max-file=3 ${FrontImageUri}
+              - Registry: !Select [0, !Split ["/", !Ref BackImageUri]]
                 DbHost: !GetAtt Database.Endpoint.Address
 
   AutoScalingGroup:
