@@ -16,7 +16,7 @@
 # Requisitos: bash, AWS CLI v2 con credenciales válidas, Docker, openssl y curl.
 # Variables opcionales: PNK_STACK, PNK_ECR_REPO, PNK_ADMIN_EMAIL, PNK_INSTANCE_TYPE, PNK_ASG_MIN, PNK_ASG_DESIRED,
 #                       PNK_ASG_MAX, PNK_COOKIE_SECURE, PNK_TRUST_PROXY, PNK_IMAGE_TAG, PNK_DB_ENGINE_VERSION, PNK_DB_CLASS,
-#                       PNK_INSTANCE_PROFILE, AWS_REGION
+#                       PNK_INSTANCE_PROFILE, PNK_SEED_CATALOGO (true = cargar los 7 restaurantes de ejemplo), AWS_REGION
 # =====================================================================================================================
 set -Eeuo pipefail
 
@@ -197,6 +197,7 @@ desplegar_pila() {
     "AsgMaxSize=${PNK_ASG_MAX:-4}"
     "CookieSecure=${cookie_secure}"
     "TrustProxy=${PNK_TRUST_PROXY:-3}"
+    "SeedCatalogo=${PNK_SEED_CATALOGO:-false}"
   )
   [ -z "${cert}" ] || params+=("CertificateArn=${cert}")
   # ajustes opcionales según lo que permita su laboratorio
@@ -227,6 +228,31 @@ esperar_salud() {
   ok "el balanceador ya envía tráfico a ${sanas} instancia(s)"
 }
 
+# Datos reales del balanceador (consultados a AWS por su DNS, no inferidos de la pila): "nombre estado tipo esquema"
+balanceador_info() {
+  local dns; dns="$(salida_pila LoadBalancerDns 2>/dev/null || true)"
+  [ -n "${dns}" ] && [ "${dns}" != "None" ] || return 1
+  aws elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='${dns}'].[LoadBalancerName,State.Code,Type,Scheme]" --output text 2>/dev/null
+}
+
+# Imprime el balanceador y sus listeners (puertos/protocolos). Si no existe, explica cómo diagnosticarlo.
+mostrar_balanceador() {
+  local info dns arn
+  info="$(balanceador_info || true)"
+  if [ -z "${info}" ] || [ "${info}" = "None" ]; then
+    falla "No se encontró el balanceador de carga (ALB) en la región ${REGION}."
+    echo "     Compruebe que la consola de AWS esté en la misma región (arriba a la derecha: ${REGION}) y que la pila haya terminado:"
+    echo "       ./scripts/desplegar.sh status          aws cloudformation describe-stack-resources --stack-name ${STACK} --query \"StackResources[?ResourceType=='AWS::ElasticLoadBalancingV2::LoadBalancer']\""
+    return 1
+  fi
+  dns="$(salida_pila LoadBalancerDns)"
+  # shellcheck disable=SC2086
+  set -- ${info}
+  ok "balanceador de carga: $1  (estado: $2, tipo: $3, esquema: $4, región ${REGION})"
+  arn="$(aws elbv2 describe-load-balancers --query "LoadBalancers[?DNSName=='${dns}'].LoadBalancerArn" --output text 2>/dev/null)"
+  aws elbv2 describe-listeners --load-balancer-arn "${arn}" --query 'Listeners[].[Protocol,Port]' --output text 2>/dev/null | sed 's/^/     listener: /'
+}
+
 resumen() {
   local url; url="$(salida_pila ApplicationUrl)"
   echo
@@ -234,6 +260,7 @@ resumen() {
   printf '%s Aplicación desplegada%s\n' "${NEGRITA}" "${FIN}"
   printf '   URL (HTTP):   %s\n' "${url}"
   printf '   Salud:        %s/salud\n' "${url}"
+  printf '   Balanceador:  %s  (región %s)\n' "$(balanceador_info | awk '{print $1" ["$2"]"}' || true)" "${REGION}"
   printf '   Base de datos: RDS PostgreSQL (privada): %s\n' "$(salida_pila DatabaseEndpoint)"
   printf '   Panel admin:  %s/admin   (imágenes en S3: %s)\n' "${url}" "$(salida_pila MediaBucketName)"
   printf '   Administrador: %s\n' "${ADMIN_EMAIL}"
@@ -276,6 +303,9 @@ cmd_status() {
     --query 'AutoScalingGroups[0].[MinSize,DesiredCapacity,MaxSize]' --output text | awk '{printf "  mínimo=%s  deseadas=%s  máximo=%s\n",$1,$2,$3}'
   aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "${asg}" \
     --query 'AutoScalingGroups[0].Instances[].[InstanceId,AvailabilityZone,LifecycleState,HealthStatus]' --output text | sed 's/^/  /'
+
+  paso "Balanceador de carga (ALB)"
+  mostrar_balanceador || true
 
   paso "Salud en el balanceador"
   aws elbv2 describe-target-health --target-group-arn "${tg}" \

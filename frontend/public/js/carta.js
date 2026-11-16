@@ -120,10 +120,32 @@
       h('span', { class: 'ms-2' }, 'Sesión de administrador: ', h('b', null, sesion.usuario.nombre), ' · ', h('a', { href: '/admin' }, 'Ir al panel')));
   }
 
+  /** Portada cuando todavía no hay ningún restaurante creado desde el panel. */
+  function sinRestaurantes() {
+    return h('section', null, h('div', { class: 'container contendor' },
+      h('div', { class: 'row' }, h('div', { class: 'col-lg-12 text-center', style: 'padding: 80px 0;' },
+        h('img', { class: 'logosintituciones', src: '/img/logo.png', width: '190px', alt: '' }), h('br'), h('br'),
+        h('h4', { class: 'intro-title', style: 'text-align: center' }, 'Aún no hay restaurantes publicados'),
+        h('h5', null, 'Vuelve pronto: estamos preparando la carta.')))));
+  }
+
   async function iniciar() {
     try {
       var coincide = window.location.pathname.match(/^\/restaurantes\/(\d+)\/?$/);
-      var id = coincide ? coincide[1] : (await P.api('GET', '/restaurantes/primero')).id;
+      var id;
+      if (coincide) {
+        id = coincide[1];
+      } else {
+        try {
+          id = (await P.api('GET', '/restaurantes/primero')).id;
+        } catch (e) {
+          if (e.status !== 404) throw e;
+          // sin restaurantes publicados todavía: pantalla informativa (no es un error)
+          document.title = 'CartaPnk';
+          P.montar(app, sinRestaurantes());
+          return;
+        }
+      }
       var resultados = await Promise.all([P.api('GET', '/restaurantes/' + id), P.api('GET', '/sesion').catch(function () { return null; })]);
       var d = resultados[0];
       document.title = d.restaurante.nombre;

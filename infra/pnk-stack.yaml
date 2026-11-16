@@ -98,9 +98,11 @@ Parameters:
     Description: Proxys de confianza delante de la API (Nginx del frontend + balanceador + Cloudflare = 3; sin Cloudflare = 2)
   SeedCatalogo:
     Type: String
-    Default: "true"
+    Default: "false"
     AllowedValues: ["true", "false"]
-    Description: Cargar el catálogo de restaurantes de ejemplo si la base está vacía
+    Description: >-
+      "true" carga los restaurantes de ejemplo si la base está vacía. Por defecto "false": producción parte sin datos y se muestran
+      solo los restaurantes creados desde el panel de administración.
   CertificateArn:
     Type: String
     Default: ""

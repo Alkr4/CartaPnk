@@ -265,3 +265,22 @@ test('la configuración de Nginx reenvía /api, /media y /salud a la API y defin
   assert.ok(seg.includes("script-src 'self'"));
   assert.ok(seg.includes("frame-ancestors 'none'"));
 });
+
+// ---------------------------------------------------------------- producción sin datos
+test('sin restaurantes creados, "/" muestra un aviso (no una pantalla de error) y /restaurantes/N de un restaurante creado carga', async () => {
+  const vacio = abrirPagina('carta.html', ['js/comun.js', 'js/carta.js'], {
+    url: 'http://localhost/',
+    api: (m, ruta) => (ruta === '/api/restaurantes/primero' ? { estado: 404, cuerpo: { error: 'Restaurante no encontrado' } } : { cuerpo: { usuario: null, csrfToken: 't' } }),
+  });
+  await esperar(() => vacio.document.body.textContent.includes('Aún no hay restaurantes publicados'), 'aviso de portada vacía');
+  assert.equal(vacio.document.querySelector('.volver'), null, 'no debe ser la pantalla de error con enlace circular');
+
+  // un restaurante creado desde el panel (id 2) se muestra directamente por su URL
+  const creado = { ...datosCarta, restaurante: { ...datosCarta.restaurante, id: 2, nombre: 'Mi Restaurante Nuevo' }, destacados: [], cartas: [], comentarios: [] };
+  const pagina = abrirPagina('carta.html', ['js/comun.js', 'js/carta.js'], {
+    url: 'http://localhost/restaurantes/2',
+    api: (m, ruta) => (ruta === '/api/sesion' ? { cuerpo: { usuario: null, csrfToken: 't' } } : { cuerpo: creado }),
+  });
+  await esperar(() => pagina.document.title === 'Mi Restaurante Nuevo', 'restaurante creado');
+  assert.ok(pagina.document.body.textContent.includes('Mi Restaurante Nuevo'));
+});
