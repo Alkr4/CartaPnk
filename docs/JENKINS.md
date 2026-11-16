@@ -29,7 +29,7 @@ GitHub ──webhook──► Jenkins (EC2 #2, Docker) ──► pipeline ──
 | 4 | Calidad | Jest + Supertest en Docker (ambiente **QA**) | regresiones funcionales y de seguridad (CSRF, XSS, SQLi, sesión) | cualquier prueba roja |
 | 5 | Imagen | **Trivy** sobre la imagen `produccion` | CVE en el SO base y en las librerías | HIGH/CRITICAL con parche disponible |
 | 6 | DAST | **OWASP ZAP** baseline contra QA | cabeceras, cookies, XSS/SQLi reflejados | reglas `FAIL` de [`jenkins/zap-reglas.tsv`](../jenkins/zap-reglas.tsv) |
-| 7 | MITRE | [`tools/mapear-mitre.js`](../tools/mapear-mitre.js) | consolida los hallazgos por CWE → CAPEC → ATT&CK | informativo (artefacto `mitre.md`) |
+| 7 | MITRE | [`backend/tools/mapear-mitre.js`](../backend/tools/mapear-mitre.js) | consolida los hallazgos por CWE → CAPEC → ATT&CK | informativo (artefacto `mitre.md`) |
 | 8 | Aprobación | `input` de Jenkins | — | un humano autoriza producción |
 | 9 | Despliegue | SSH al EC2 de producción + `docker compose` | — | prueba de humo `/salud` por Cloudflare |
 
@@ -57,7 +57,7 @@ No existe un "plugin de MITRE" para Jenkins. MITRE aporta **catálogos** que las
 
 1. **CVE** (MITRE): Dependency-Check y Trivy reportan vulnerabilidades por identificador CVE.
 2. **CWE** (MITRE): tipo de debilidad. Dependency-Check lista los `cwes` de cada vulnerabilidad, ZAP incluye `cweid` en cada alerta y las reglas de Semgrep llevan etiquetas `CWE-xxx`.
-3. **CAPEC y ATT&CK** (MITRE): patrón de ataque y técnica del adversario. `tools/mapear-mitre.js` consolida los reportes y, con la tabla [`tools/mitre-mapping.json`](../tools/mitre-mapping.json), genera `reportes/mitre.md`:
+3. **CAPEC y ATT&CK** (MITRE): patrón de ataque y técnica del adversario. `backend/tools/mapear-mitre.js` consolida los reportes y, con la tabla [`backend/tools/mitre-mapping.json`](../backend/tools/mitre-mapping.json), genera `reportes/mitre.md`:
    *hallazgo → CWE → CAPEC → técnica ATT&CK* (por ejemplo CWE-89 → CAPEC-66 → T1190; CWE-307 → CAPEC-49 → T1110).
    La tabla es una propuesta de trabajo: valide cada fila en cwe.mitre.org / capec.mitre.org / attack.mitre.org antes de citarla.
 

@@ -3,7 +3,7 @@
 Flujo completo para dejar la aplicación en GitHub, ejecutándose en un EC2 de AWS Academy y publicada a través de Cloudflare.
 
 ```
- GitHub  ──git pull──►  EC2 (Docker: app + PostgreSQL)  ◄──túnel saliente──  Cloudflare (HTTPS, WAF, DNS)  ◄──  Usuarios
+ GitHub  ──git pull──►  EC2 (Docker: front Nginx + back API + PostgreSQL)  ◄──túnel saliente──  Cloudflare (HTTPS, WAF, DNS)  ◄──  Usuarios
 ```
 
 ---
@@ -101,7 +101,7 @@ Aquí Cloudflare va **delante** de AWS como DNS, proxy inverso con HTTPS, CDN, W
 - **Para una demostración sin dominio** use un *Quick Tunnel* (URL temporal `https://<aleatorio>.trycloudflare.com`, sin cuenta, sin garantía de disponibilidad; sólo pruebas):
 
 ```bash
-docker run --rm --network pnk-prod_default cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://app:3000
+docker run --rm --network pnk-prod_default cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://front:8080
 ```
 
 ### 3.3 Cloudflare Tunnel con token (recomendado)
@@ -115,8 +115,8 @@ TUNNEL_TOKEN=<pegue el token>
 APP_BIND=127.0.0.1
 ```
 
-4. En el panel, pestaña **Public Hostname → Add**: subdominio `menu`, dominio el suyo, **Service: HTTP**, **URL: `app:3000`**
-   (se usa el nombre del servicio Compose porque `cloudflared` y `app` comparten la red de Docker; `localhost` apuntaría al propio contenedor del túnel).
+4. En el panel, pestaña **Public Hostname → Add**: subdominio `menu`, dominio el suyo, **Service: HTTP**, **URL: `front:8080`**
+   (se usa el nombre del servicio Compose porque `cloudflared` y `front` (Nginx) comparten la red de Docker; `localhost` apuntaría al propio contenedor del túnel).
    Cloudflare crea automáticamente el registro DNS `CNAME` con proxy activo.
 5. Levante el conector:
 
@@ -145,7 +145,7 @@ curl -sI https://menu.<su-dominio>/restaurantes/1 | grep -iE "^(cf-ray|server|st
 
 Debe verse `cf-ray` (pasó por Cloudflare), `strict-transport-security`, la CSP y la cookie `pnk.sid` con `Secure; HttpOnly; SameSite=Lax`.
 
-> **IP del cliente y límite de intentos.** La app confía en 1 proxy (`TRUST_PROXY=1`) para obtener la IP real del visitante, que usa el límite de intentos de login. Detrás del túnel el valor correcto es 1; si agrega otro proxy en medio (por ejemplo Nginx), súbalo a 2.
+> **IP del cliente y límite de intentos.** La API confía en 2 proxys (`TRUST_PROXY=2`: el Nginx del frontend y el túnel de Cloudflare) para obtener la IP real del visitante, que usa el límite de intentos de login. Detrás del túnel el valor correcto es 1; si agrega otro proxy en medio (por ejemplo Nginx), súbalo a 2.
 
 ### 3.6 Alternativa sin túnel (más pasos)
 
@@ -171,4 +171,4 @@ Registro DNS `A` hacia una Elastic IP con el proxy activado (nube naranja), SSL/
 | El build se queda "pegado" en `npm ci` durante muchos minutos | Poca RAM (instancias de 1 GB) y sin swap | Cree un swap de 2 GB (`sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`), detenga lo que no use (`docker ps`) y construya de a una imagen: `docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml build pruebas` y luego `... build app` |
 | `permission denied … docker.sock` | El usuario aún no pertenece al grupo `docker` | `sudo usermod -aG docker ec2-user` y vuelva a iniciar sesión por SSH |
 | La app no arranca y el log dice `Variable de entorno obligatoria no definida` | Falta algo en `env/prod.env` | Complete la variable indicada (producción no usa valores por defecto) |
-| Demasiados bloqueos de login a usuarios distintos | La IP detectada es la de Cloudflare, no la del visitante | Revise `TRUST_PROXY` (1 detrás del túnel) |
+| Demasiados bloqueos de login a usuarios distintos | La IP detectada es la de Cloudflare, no la del visitante | Revise `TRUST_PROXY` (2 detrás del túnel: Nginx + cloudflared) |

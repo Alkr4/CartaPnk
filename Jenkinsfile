@@ -57,13 +57,13 @@ pipeline {
       parallel {
         stage('npm audit') {
           steps {
-            sh 'docker run --rm -v "$PWD":/app -w /app $NODE_IMG sh -c "npm ci --omit=dev && npm audit --omit=dev --audit-level=high"'
+            sh 'docker run --rm -v "$PWD":/app -w /app/backend $NODE_IMG sh -c "npm ci --omit=dev && npm audit --omit=dev --audit-level=high"'
           }
         }
         stage('OWASP Dependency-Check') {
           steps {
             // (*) requiere la herramienta "dependency-check" configurada en Manage Jenkins > Tools
-            dependencyCheck additionalArguments: '--scan package-lock.json --format JSON --format XML --format HTML --out reportes/dependency-check --failOnCVSS 9',
+            dependencyCheck additionalArguments: '--scan backend/package-lock.json --format JSON --format XML --format HTML --out reportes/dependency-check --failOnCVSS 9',
                             odcInstallation: 'dependency-check'
             // (*) umbrales: el nombre exacto de los parámetros se valida en el generador de snippets
             dependencyCheckPublisher pattern: 'reportes/dependency-check/dependency-check-report.xml',
@@ -100,15 +100,15 @@ pipeline {
     // ---------------------------------------------------------------- DAST sobre QA
     stage('Desplegar QA y DAST (OWASP ZAP)') {
       steps {
-        sh '$COMPOSE_QA up -d --build app db'
+        sh '$COMPOSE_QA up -d --build back front db'
         sh '''
           # esperar a que la app responda dentro de la red de Docker del proyecto
           for i in $(seq 1 30); do
-            docker run --rm --network ${PROY_QA}_default curlimages/curl -fsS http://app:3000/salud && break || sleep 3
+            docker run --rm --network ${PROY_QA}_default curlimages/curl -fsS http://front:8080/salud && break || sleep 3
           done
           # escaneo pasivo (baseline); las reglas con FAIL en jenkins/zap-reglas.tsv rompen el build
           docker run --rm --network ${PROY_QA}_default -v "$PWD/reportes":/zap/wrk:rw -v "$PWD/jenkins":/zap/config:ro \
-            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://app:3000/restaurantes/1 \
+            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://front:8080/restaurantes/1 \
             -c /zap/config/zap-reglas.tsv -r zap-baseline.html -J zap-baseline.json
         '''
       }
@@ -120,7 +120,7 @@ pipeline {
     // ---------------------------------------------------------------- MITRE: consolidar CWE -> CAPEC -> ATT&CK
     stage('Informe MITRE (CWE / CAPEC / ATT&CK)') {
       steps {
-        sh 'docker run --rm -v "$PWD":/app -w /app $NODE_IMG node tools/mapear-mitre.js reportes reportes/mitre.md'
+        sh 'docker run --rm -v "$PWD":/app -w /app $NODE_IMG node backend/tools/mapear-mitre.js reportes reportes/mitre.md'
       }
     }
 
