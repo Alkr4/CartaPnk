@@ -55,7 +55,38 @@ Se elige con `STORAGE_DRIVER`:
 Con varias instancias hace falta S3: el disco de cada instancia es distinto y se pierde al reemplazarla. Las fotos originales del
 sitio (`public/imagenes/…`) siguen funcionando; las nuevas se sirven por `/media/…`.
 
-## Bloquear `/admin` en Cloudflare (recomendado)
+## Defensa en profundidad: qué protege a `/admin` y qué dejamos fuera (y por qué)
+
+Un panel de administración se protege en **capas**: si una falla, la siguiente sigue en pie.
+
+| Capa | Dónde | Estado |
+|---|---|---|
+| 1. Contraseña con **bcrypt**, mensaje de error genérico, tiempo de respuesta igualado | La app | ✅ implementada |
+| 2. **Rol** `admin` comprobado en el servidor en cada petición; CSRF; sesión de 2 h; cookie `HttpOnly`+`Secure`+`SameSite` | La app | ✅ implementada |
+| 3. **Límite de intentos** de login: 5 fallos por IP+correo en 15 min (contador en PostgreSQL, vale para todas las instancias) | La app | ✅ implementada |
+| 4. Páginas y API del panel con `no-store` y `noindex` (no se cachean ni salen en buscadores) | La app / Nginx | ✅ implementada |
+| 5. **Regla WAF**: sólo ciertas IP llegan a `/admin` y `/api/admin` | Cloudflare | ⛔ no aplicada |
+| 6. **Rate limiting en el borde**: Cloudflare corta los intentos de login antes de que lleguen a AWS | Cloudflare | ⛔ no aplicada |
+| 7. **Cloudflare Access**: pide un código enviado a un correo autorizado *antes* de mostrar el login | Cloudflare | ⛔ no aplicada |
+
+### Por qué importan las capas 5, 6 y 7
+
+- **Reducen la superficie de ataque.** Sin ellas, *cualquiera en Internet* puede llegar al formulario de login y probar contraseñas; con ellas, el atacante ni siquiera ve el formulario. Un fallo futuro en la app (una vulnerabilidad nueva en el login, una dependencia con CVE) no sería explotable desde fuera.
+- **Cortan el abuso donde es más barato.** La capa 3 detiene la fuerza bruta, pero la petición ya consumió CPU y base de datos de AWS. Con la 6, Cloudflare absorbe el tráfico malicioso sin gastar crédito de AWS (relevante frente a un ataque de denegación de servicio).
+- **Añaden un segundo factor independiente de la app.** Con Access hacen falta *dos* cosas distintas: acceso al correo autorizado **y** usuario/contraseña. Es el equivalente a un 2FA sin escribir código.
+- **Siguen el principio de *defense in depth*** (ISO/IEC 27034, OWASP ASVS V2 y V4): ningún control es infalible, por eso se apilan.
+
+### Por qué NO están aplicadas en este proyecto (decisión consciente)
+
+- **La regla WAF por IP (5) no es viable aquí:** el sitio se administra desde **dos redes distintas** (casa y universidad) con IP diferentes y dinámicas. Una regla fija nos bloquearía a nosotros mismos cada vez que cambie la IP, y en plena demostración sería un riesgo real de quedar fuera.
+- **Access (7) sí resolvería el problema de la IP**, pero exige activar Zero Trust (a veces pide una tarjeta aun en el plan gratis) y depende de la cuenta de Cloudflare del alumno; para un laboratorio con cuentas de AWS rotativas se consideró un costo de gestión innecesario.
+- **El rate limiting de borde (6)** en el plan gratuito permite **una** sola regla y duplica el límite que ya aplica la app (capa 3).
+- Las capas 1 a 4 **ya cubren el riesgo principal** (adivinar contraseñas, escalar privilegios, CSRF, secuestro de sesión) y están **probadas con pruebas automáticas** (`backend/tests/admin-auth.test.js`, `admin-crud.test.js`).
+
+> **Conclusión para la defensa:** las capas 5-7 son una **mejora recomendada, no un requisito**, y la ruta para añadirlas está documentada y es de minutos (secciones siguientes).
+> En un entorno real (IP fija de oficina o VPN corporativa) activaría **la 5 y la 7** de inmediato.
+
+## Cómo activar las capas 5-7 en Cloudflare (opcional)
 
 La URL `/admin` solo está "oculta" por no estar enlazada; la protección real es el login. Con el dominio en Cloudflare se puede añadir
 una **segunda puerta** que corta el tráfico **antes de que llegue a AWS**. Elija una de las dos opciones.
