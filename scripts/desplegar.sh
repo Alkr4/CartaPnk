@@ -12,6 +12,12 @@
 #   ./scripts/desplegar.sh tunel              publica la URL con un túnel TEMPORAL de Cloudflare (trycloudflare.com)
 #   ./scripts/desplegar.sh carga              genera tráfico para demostrar el Auto Scaling
 #   ./scripts/desplegar.sh down [--ecr]       DESTRUYE la infraestructura (pide confirmación; --ecr borra también las imágenes)
+#   ./scripts/desplegar.sh construir <version>            construye y publica en ECR las imágenes de esa versión (CI)
+#   ./scripts/desplegar.sh publicar <ambiente> <version>  despliega la versión en pruebas|produccion y verifica el servicio (CI)
+#   ./scripts/desplegar.sh revertir <ambiente>            vuelve a la versión anterior de ese ambiente
+#   ./scripts/desplegar.sh versiones [<ambiente>]         versión publicada, anterior y disponibles
+#   ./scripts/desplegar.sh continuidad <dominio> [seg]    retira un destino del balanceador y mide la continuidad del servicio
+#   Códigos de salida: 0 éxito · 1 error de despliegue · 2 parámetros/requisitos · 3 verificación fallida
 #
 # Requisitos: bash, AWS CLI v2 con credenciales válidas, Docker, openssl y curl.
 # Variables opcionales: PNK_STACK, PNK_ECR_REPO, PNK_ADMIN_EMAIL, PNK_INSTANCE_TYPE, PNK_ASG_MIN, PNK_ASG_DESIRED,
@@ -276,6 +282,255 @@ resumen() {
   echo "  • HTTPS con Cloudflare (manual):  ./scripts/desplegar.sh tunel      (ver docs/DESPLIEGUE-AWS.md, sección Cloudflare)"
   echo "  • Probar el Auto Scaling:         ./scripts/desplegar.sh carga      y  ./scripts/desplegar.sh status"
   echo "  • AL TERMINAR la demostración:    ./scripts/desplegar.sh down       (la infraestructura cuesta dinero mientras exista)"
+}
+
+# ------------------------------------------------------------------------------------------------ versiones (CI/CD)
+# Comandos pensados para que Jenkins los invoque sin intervención humana:
+#   construir <version>            construye y publica en ECR las imágenes back-<version> y front-<version>
+#   publicar <ambiente> <version>  despliega esa versión en el ambiente y VERIFICA que el servicio la esté sirviendo
+#   revertir <ambiente>            vuelve a publicar la versión anterior de ese ambiente
+#   versiones [<ambiente>]         muestra la versión publicada, la anterior y las disponibles en ECR
+# Códigos de salida: 0 = éxito · 1 = error de despliegue · 2 = parámetros inválidos o falta un requisito · 3 = la verificación falló
+# PNK_REVERTIR_SI_FALLA=1 vuelve sola a la versión anterior si la verificación falla · PNK_DOMINIO=<dominio> verifica también por HTTPS
+EXIT_PARAMETROS=2
+EXIT_VERIFICACION=3
+terminar() { local codigo="$1"; shift; printf '%sError:%s %s\n' "${ROJO}" "${FIN}" "$*" >&2; exit "${codigo}"; }
+
+# Ambientes de AWS: cada uno es una pila de CloudFormation independiente.
+usar_ambiente() {
+  case "${1:-}" in
+    pruebas) STACK="${PNK_STACK:-cartapnk}" ;;
+    produccion) STACK="${PNK_STACK_PRODUCCION:-cartapnk-produccion}" ;;
+    *) terminar "${EXIT_PARAMETROS}" "Ambiente inválido: '${1:-}'. Valores permitidos: pruebas, produccion" ;;
+  esac
+  AMBIENTE="$1"
+}
+
+validar_version() {
+  [[ "${1:-}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] \
+    || terminar "${EXIT_PARAMETROS}" "Versión inválida: '${1:-}'. Use letras, números, '.', '_' o '-' (p. ej. 1.4.0 o el hash corto del commit)"
+}
+
+imagenes_de() { # imagenes_de <version> -> deja IMAGEN_BACK e IMAGEN_FRONT
+  local registro="${CUENTA}.dkr.ecr.${REGION}.amazonaws.com"
+  IMAGEN_BACK="${registro}/${REPO}:back-$1"
+  IMAGEN_FRONT="${registro}/${REPO}:front-$1"
+}
+
+existen_imagenes() { # existen_imagenes <version> -> 0 si back-<v> y front-<v> están en ECR
+  local n
+  n="$(aws ecr describe-images --repository-name "${REPO}" --image-ids "imageTag=back-$1" "imageTag=front-$1" \
+        --query 'length(imageDetails)' --output text 2>/dev/null || echo 0)"
+  [ "${n}" = "2" ]
+}
+
+version_publicada() { # versión que la pila está sirviendo (la etiqueta de la imagen de la API), o vacío
+  local uri
+  uri="$(aws cloudformation describe-stacks --stack-name "${STACK}" \
+          --query "Stacks[0].Parameters[?ParameterKey=='BackImageUri'].ParameterValue" --output text 2>/dev/null || true)"
+  [[ "${uri}" == *":back-"* ]] && echo "${uri##*:back-}"
+}
+
+etiqueta_pila() { # etiqueta_pila <clave>
+  aws cloudformation describe-stacks --stack-name "${STACK}" --query "Stacks[0].Tags[?Key=='$1'].Value" --output text 2>/dev/null || true
+}
+
+cmd_construir() {
+  local version="${1:-}"
+  validar_version "${version}"
+  requisitos
+  aws ecr describe-repositories --repository-names "${REPO}" >/dev/null 2>&1 \
+    || aws ecr create-repository --repository-name "${REPO}" --image-scanning-configuration scanOnPush=true >/dev/null
+  imagenes_de "${version}"
+  if existen_imagenes "${version}"; then
+    ok "la versión ${version} ya está en ECR (las imágenes son inmutables: no se reconstruye)"
+    return 0
+  fi
+  local commit; commit="$(git -C "${RAIZ}" rev-parse HEAD 2>/dev/null || echo desconocido)"
+  paso "Construyendo la versión ${version} (commit ${commit:0:12})"
+  docker build --target produccion --build-arg "APP_VERSION=${version}" --build-arg "GIT_COMMIT=${commit}" -t "${IMAGEN_BACK}" "${RAIZ}/backend" \
+    || terminar 1 "Falló la construcción de la imagen de la API"
+  docker build -t "${IMAGEN_FRONT}" "${RAIZ}/frontend" || terminar 1 "Falló la construcción de la imagen del frontend"
+  paso "Publicando en ECR"
+  aws ecr get-login-password | docker login --username AWS --password-stdin "${IMAGEN_BACK%%/*}" >/dev/null
+  docker push "${IMAGEN_BACK}" >/dev/null || terminar 1 "No se pudo publicar ${IMAGEN_BACK}"
+  docker push "${IMAGEN_FRONT}" >/dev/null || terminar 1 "No se pudo publicar ${IMAGEN_FRONT}"
+  ok "publicadas: back-${version} y front-${version}"
+}
+
+# Comprueba que el servicio responda con la versión esperada en N respuestas SEGUIDAS (así se cubren todas las instancias
+# detrás del balanceador). Devuelve 0 si lo logra antes del plazo.
+comprobar_version() { # comprobar_version <url-base> <version> <consecutivas> <plazo-segundos>
+  local base="$1" esperada="$2" necesarias="$3" plazo="$4"
+  local inicio seguidas=0 respuesta version instancias=""
+  inicio="$(date +%s)"
+  while [ $(( $(date +%s) - inicio )) -lt "${plazo}" ]; do
+    respuesta="$(curl -fsS --max-time 10 -H 'Cache-Control: no-cache' "${base}/api/version" 2>/dev/null || true)"
+    version="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' <<<"${respuesta}")"
+    if [ "${version}" = "${esperada}" ]; then
+      seguidas=$((seguidas + 1))
+      instancias="${instancias} $(sed -n 's/.*"instancia":"\([^"]*\)".*/\1/p' <<<"${respuesta}")"
+      if [ "${seguidas}" -ge "${necesarias}" ]; then
+        ok "${base} sirve la versión ${esperada} (${seguidas} respuestas seguidas; instancias:$(tr ' ' '\n' <<<"${instancias}" | sort -u | tr '\n' ' '))"
+        return 0
+      fi
+    else
+      [ "${seguidas}" -gt 0 ] && aviso "respuesta con versión '${version:-sin respuesta}': se reinicia la cuenta"
+      seguidas=0; instancias=""
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+cmd_publicar() {
+  local ambiente="${1:-}" version="${2:-}"
+  usar_ambiente "${ambiente}"
+  validar_version "${version}"
+  [ -f "${PLANTILLA}" ] || terminar "${EXIT_PARAMETROS}" "No se encuentra ${PLANTILLA}"
+  requisitos
+  paso "Publicar versión ${version} en '${AMBIENTE}' (pila ${STACK} · cuenta ${CUENTA} · región ${REGION})"
+
+  imagenes_de "${version}"
+  if ! existen_imagenes "${version}"; then
+    [ "${PNK_SIN_CONSTRUIR:-0}" = "1" ] && terminar "${EXIT_PARAMETROS}" "La versión ${version} no existe en ECR (ejecute antes: ./scripts/desplegar.sh construir ${version})"
+    cmd_construir "${version}"
+  fi
+
+  local anterior estado
+  estado="$(estado_pila)"
+  anterior="$(version_publicada || true)"
+  if [ "${estado}" = "NO_EXISTE" ]; then
+    # primera vez: se crea toda la infraestructura (secretos generados y guardados sólo en este equipo)
+    aviso "La pila '${STACK}' no existe: se crea completa (~15 min)."
+    asegurar_secretos
+    desplegar_pila
+  else
+    [[ "${estado}" == *_COMPLETE ]] || terminar 1 "La pila está en estado ${estado}; espere a que termine o revísela antes de publicar."
+    if [ "${anterior}" = "${version}" ]; then ok "la versión ${version} ya está publicada en '${AMBIENTE}' (se verifica igual)"; fi
+    # Actualización: SÓLO cambian las imágenes. El resto de parámetros (contraseñas incluidas) conserva su valor anterior,
+    # así Jenkins nunca necesita ni imprime secretos.
+    paso "Actualizando las imágenes (rolling update: las instancias se reemplazan de a una, sin cortar el servicio)"
+    aws cloudformation deploy --stack-name "${STACK}" --template-file "${PLANTILLA}" \
+        --parameter-overrides "BackImageUri=${IMAGEN_BACK}" "FrontImageUri=${IMAGEN_FRONT}" \
+        --no-fail-on-empty-changeset \
+        --tags proyecto=cartapnk "ambiente=${AMBIENTE}" "version=${version}" "version-anterior=${anterior:-ninguna}" \
+      || { eventos_fallidos; terminar 1 "Falló la actualización de la pila (CloudFormation revierte solo a la versión anterior)."; }
+  fi
+  ok "pila lista: $(estado_pila)"
+
+  paso "Verificando el servicio"
+  local url; url="$(salida_pila ApplicationUrl)"
+  [ -n "${url}" ] || terminar "${EXIT_VERIFICACION}" "La pila no informa la URL del balanceador."
+  curl -fsS --max-time 10 "${url}/salud" >/dev/null 2>&1 || aviso "/salud aún no responde 200; se reintenta en la comprobación de versión"
+  local motivo=""
+  comprobar_version "${url}" "${version}" "${PNK_VERIFICAR_RESPUESTAS:-6}" "${PNK_VERIFICAR_SEGUNDOS:-600}" \
+    || motivo="El balanceador no sirvió la versión ${version} dentro del plazo. Diagnóstico: ./scripts/desplegar.sh status"
+  if [ -z "${motivo}" ] && [ -n "${PNK_DOMINIO:-}" ]; then
+    comprobar_version "https://${PNK_DOMINIO}" "${version}" 3 "${PNK_VERIFICAR_SEGUNDOS:-600}" \
+      || motivo="https://${PNK_DOMINIO} no sirve la versión ${version} (revise Cloudflare: ./scripts/desplegar.sh dominio)"
+  fi
+  if [ -n "${motivo}" ]; then
+    # PNK_REVERTIR_SI_FALLA=1: si la verificación falla se vuelve sola a la versión anterior (el código de salida sigue siendo 3)
+    if [ "${PNK_REVERTIR_SI_FALLA:-0}" = "1" ] && [ -n "${anterior}" ] && [ "${anterior}" != "${version}" ]; then
+      falla "${motivo}"
+      aviso "Reversión automática a la versión ${anterior}"
+      ( PNK_REVERTIR_SI_FALLA=0 PNK_SIN_CONSTRUIR=1 cmd_publicar "${ambiente}" "${anterior}" ) || falla "la reversión automática también falló"
+    fi
+    terminar "${EXIT_VERIFICACION}" "${motivo}"
+  fi
+  echo
+  ok "PUBLICADA: versión ${version} en '${AMBIENTE}' (anterior: ${anterior:-ninguna}). Para volver atrás: ./scripts/desplegar.sh revertir ${AMBIENTE}"
+}
+
+cmd_revertir() {
+  local ambiente="${1:-}"
+  usar_ambiente "${ambiente}"
+  requisitos
+  local anterior; anterior="$(etiqueta_pila version-anterior)"
+  { [ -n "${anterior}" ] && [ "${anterior}" != "None" ] && [ "${anterior}" != "ninguna" ]; } \
+    || terminar "${EXIT_PARAMETROS}" "No hay una versión anterior registrada para '${AMBIENTE}'. Publique una versión concreta: ./scripts/desplegar.sh publicar ${AMBIENTE} <version>"
+  aviso "Se vuelve a la versión ${anterior} en '${AMBIENTE}'."
+  PNK_SIN_CONSTRUIR=1 cmd_publicar "${ambiente}" "${anterior}"
+}
+
+cmd_versiones() {
+  usar_ambiente "${1:-pruebas}"
+  requisitos
+  paso "Versiones de '${AMBIENTE}' (pila ${STACK})"
+  echo "  publicada: $(version_publicada || echo '-')"
+  echo "  anterior:  $(etiqueta_pila version-anterior)"
+  paso "Disponibles en ECR (${REPO}), las más recientes primero"
+  aws ecr describe-images --repository-name "${REPO}" --filter tagStatus=TAGGED \
+    --query 'reverse(sort_by(imageDetails,&imagePushedAt))[].[imagePushedAt,join(`,`,imageTags)]' --output text 2>/dev/null \
+    | grep 'back-' | head -n 10 | sed 's/back-//; s/^/  /' || echo "  (sin imágenes)"
+}
+
+# ------------------------------------------------------------------------------------------------ prueba de continuidad
+# Retira de forma controlada UNO de los destinos del balanceador mientras se hacen solicitudes periódicas a una ruta dinámica
+# sin caché (/api/version, llega a Node.js) y registra cada respuesta. Fases: antes (ambos destinos sanos) -> durante (un destino
+# retirado) -> después (destino restituido). Deja un CSV con: fase, hora, código HTTP, instancia que respondió y tiempo.
+cmd_continuidad() {
+  local destino_url="${1:-}" segundos_fase="${2:-45}"
+  [ -n "${destino_url}" ] || terminar "${EXIT_PARAMETROS}" "Uso: ./scripts/desplegar.sh continuidad <dominio|url> [segundos-por-fase]   (p. ej. continuidad ejemplo.com 45)"
+  [[ "${destino_url}" == http* ]] || destino_url="https://${destino_url}"
+  [[ "${segundos_fase}" =~ ^[0-9]+$ ]] || terminar "${EXIT_PARAMETROS}" "segundos-por-fase debe ser un número"
+  usar_ambiente "${PNK_AMBIENTE:-pruebas}"
+  requisitos
+
+  local tg; tg="$(salida_pila TargetGroupArn)"
+  [ -n "${tg}" ] && [ "${tg}" != "None" ] || terminar 1 "No se encontró el Target Group de la pila ${STACK}"
+  local sanos; sanos="$(aws elbv2 describe-target-health --target-group-arn "${tg}" --query "TargetHealthDescriptions[?TargetHealth.State=='healthy'].Target.Id" --output text)"
+  [ "$(wc -w <<<"${sanos}")" -ge 2 ] || terminar 1 "Se necesitan al menos 2 destinos sanos (hay: ${sanos:-ninguno})"
+  local retirado; retirado="$(awk '{print $1}' <<<"${sanos}")"
+
+  mkdir -p "${ESTADO}"
+  local csv; csv="${ESTADO}/continuidad-$(date +%Y%m%d-%H%M%S).csv"
+  echo "fase,hora,codigo,instancia,segundos" > "${csv}"
+  local fase_archivo; fase_archivo="$(mktemp)"; echo "antes" > "${fase_archivo}"
+
+  # sondeo en segundo plano: 1 solicitud por segundo
+  (
+    while [ -f "${fase_archivo}" ]; do
+      local r codigo cuerpo
+      r="$(curl -s --max-time 5 -H 'Cache-Control: no-cache' -w '\n%{http_code} %{time_total}' "${destino_url}/api/version?t=$(date +%s%N)" 2>/dev/null || printf '\n000 5')"
+      codigo="$(tail -n1 <<<"${r}" | awk '{print $1}')"
+      cuerpo="$(sed '$d' <<<"${r}")"
+      echo "$(cat "${fase_archivo}" 2>/dev/null || echo fin),$(date +%H:%M:%S),${codigo},$(sed -n 's/.*"instancia":"\([^"]*\)".*/\1/p' <<<"${cuerpo}"),$(tail -n1 <<<"${r}" | awk '{print $2}')" >> "${csv}"
+      sleep 1
+    done
+  ) &
+  local sondeo=$!
+
+  paso "Fase 1/3 · ambos destinos sanos (${segundos_fase} s) · URL ${destino_url}/api/version"
+  sleep "${segundos_fase}"
+
+  echo "durante" > "${fase_archivo}"
+  paso "Fase 2/3 · se retira el destino ${retirado} del balanceador"
+  aws elbv2 deregister-targets --target-group-arn "${tg}" --targets "Id=${retirado}"
+  aws elbv2 wait target-deregistered --target-group-arn "${tg}" --targets "Id=${retirado}" || true
+  ok "destino retirado (el balanceador drenó sus conexiones antes de sacarlo)"
+  sleep "${segundos_fase}"
+
+  echo "despues" > "${fase_archivo}"
+  paso "Fase 3/3 · se restituye el destino ${retirado}"
+  aws elbv2 register-targets --target-group-arn "${tg}" --targets "Id=${retirado}"
+  aws elbv2 wait target-in-service --target-group-arn "${tg}" --targets "Id=${retirado}" || aviso "el destino tarda en volver a estar sano; revise 'status'"
+  ok "destino restituido y sano"
+  sleep "${segundos_fase}"
+
+  rm -f "${fase_archivo}"; wait "${sondeo}" 2>/dev/null || true
+
+  paso "Resultado (archivo: ${csv})"
+  awk -F, 'NR>1 {
+      total[$1]++; if ($3 != "200") { err[$1]++; racha++; if (racha > max) max = racha } else racha = 0
+      if ($4 != "") inst[$1] = inst[$1] (index(inst[$1], $4) ? "" : " " $4)
+    }
+    END {
+      split("antes durante despues", f, " ")
+      for (i = 1; i <= 3; i++) printf "  %-8s solicitudes=%-4d errores=%-3d instancias:%s\n", f[i], total[f[i]], err[f[i]] + 0, inst[f[i]]
+      printf "  interrupción más larga: %d s (solicitudes consecutivas fallidas a 1 por segundo)\n", max
+    }' "${csv}"
 }
 
 # ------------------------------------------------------------------------------------------------ comandos
@@ -633,12 +888,17 @@ cmd_down() {
   fi
 }
 
-uso() { sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+uso() { sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 main() {
   local cmd="${1:-}"; shift || true
   case "${cmd}" in
     verificar) cmd_verificar ;;
+    construir) cmd_construir "$@" ;;
+    continuidad) cmd_continuidad "$@" ;;
+    publicar) cmd_publicar "$@" ;;
+    revertir) cmd_revertir "$@" ;;
+    versiones) cmd_versiones "$@" ;;
     up|actualizar) for a in "$@"; do [ "${a}" = "--sin-build" ] && SIN_BUILD=1; done; cmd_up ;;
     status) cmd_status ;;
     url) cmd_url ;;
