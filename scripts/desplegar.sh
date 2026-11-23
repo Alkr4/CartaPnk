@@ -16,7 +16,7 @@
 # Requisitos: bash, AWS CLI v2 con credenciales válidas, Docker, openssl y curl.
 # Variables opcionales: PNK_STACK, PNK_ECR_REPO, PNK_ADMIN_EMAIL, PNK_INSTANCE_TYPE, PNK_ASG_MIN, PNK_ASG_DESIRED,
 #                       PNK_ASG_MAX, PNK_COOKIE_SECURE, PNK_TRUST_PROXY, PNK_IMAGE_TAG, PNK_DB_ENGINE_VERSION, PNK_DB_CLASS,
-#                       PNK_INSTANCE_PROFILE, PNK_SEED_CATALOGO (true = cargar los 7 restaurantes de ejemplo), AWS_REGION
+#                       PNK_INSTANCE_PROFILE, PNK_SEED_CATALOGO (true = cargar los 7 restaurantes de ejemplo), PNK_DB_MULTIAZ (false = RDS sin réplica), AWS_REGION
 # =====================================================================================================================
 set -Eeuo pipefail
 
@@ -198,6 +198,7 @@ desplegar_pila() {
     "CookieSecure=${cookie_secure}"
     "TrustProxy=${PNK_TRUST_PROXY:-3}"
     "SeedCatalogo=${PNK_SEED_CATALOGO:-false}"
+    "DbMultiAz=${PNK_DB_MULTIAZ:-true}"
   )
   [ -z "${cert}" ] || params+=("CertificateArn=${cert}")
   # ajustes opcionales según lo que permita su laboratorio

@@ -73,6 +73,13 @@ Parameters:
     Type: String
     Default: "17"
     Description: Versión mayor de PostgreSQL
+  DbMultiAz:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      RDS Multi-AZ: mantiene una réplica sincrónica en otra zona de disponibilidad y conmuta sola si falla la principal.
+      Por defecto "true" (requisito del ambiente evaluado); "false" sólo para abaratar pruebas.
   DbAllocatedStorage:
     Type: Number
     Default: 20
@@ -266,7 +273,7 @@ Resources:
       DBSubnetGroupName: !Ref DbSubnetGroup
       VPCSecurityGroups: [!Ref DbSecurityGroup]
       PubliclyAccessible: false
-      MultiAZ: false # para producción real: true
+      MultiAZ: !Ref DbMultiAz # "true": réplica en espera sincrónica en otra zona de disponibilidad con conmutación automática
       BackupRetentionPeriod: 0 # laboratorio; para producción real: 7 o más
       DeletionProtection: false
       AutoMinorVersionUpgrade: true
