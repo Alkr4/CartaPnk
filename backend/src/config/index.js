@@ -48,6 +48,9 @@ const config = {
   esProduccion: ambiente === 'production',
   esTest: ambiente === 'test',
   puerto: entero('PORT', 3000),
+  // Versión desplegada (la inyecta el pipeline al construir la imagen: APP_VERSION y GIT_COMMIT)
+  version: process.env.APP_VERSION || 'desarrollo',
+  commit: process.env.GIT_COMMIT || 'desconocido',
   // Nº de proxys confiables delante de la API. Siempre hay al menos uno: el Nginx del frontend (más Cloudflare / el balanceador si existen). Necesario para req.ip y req.secure.
   trustProxy: process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) || false : (ambiente === 'test' ? false : 1),
   db: {

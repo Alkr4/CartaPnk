@@ -4,7 +4,8 @@ const bcrypt = require('bcryptjs');
 const config = require('../config');
 const Usuario = require('../models/usuario.model');
 const { texto } = require('../utils/validadores');
-const { error } = require('../middlewares/auth');
+const { error, ROLES_PANEL } = require('../middlewares/auth');
+const auditoria = require('../utils/auditoria');
 
 // Hash de una contraseña inexistente: se compara igualmente cuando el usuario no existe para que el
 // tiempo de respuesta no revele si el correo está registrado (enumeración de cuentas).
@@ -27,7 +28,8 @@ async function login(req, res, next) {
   const usuario = email ? await Usuario.buscarActivoPorEmail(email) : null;
   const coincide = await bcrypt.compare(password, usuario?.password_hash ?? HASH_FICTICIO);
 
-  if (!usuario || !coincide || !password || usuario.rol !== 'admin') {
+  if (!usuario || !coincide || !password || !ROLES_PANEL.includes(usuario.rol)) {
+    auditoria.registrar('login', 'fallo', { req, usuario: email || undefined });
     return next(error(401, 'Credenciales incorrectas.'));
   }
 
@@ -41,18 +43,21 @@ async function login(req, res, next) {
     req.session.carrito = carrito ?? [];
     req.session.csrfToken = crypto.randomBytes(32).toString('hex');
     req.session.cookie.maxAge = config.sesion.duracionAdminMs; // sesión de administrador más corta
-    return req.session.save((errGuardar) => (errGuardar ? next(errGuardar) : res.json({
-      usuario: { nombre: usuario.nombre, rol: usuario.rol },
-      csrfToken: req.session.csrfToken,
-    })));
+    return req.session.save((errGuardar) => {
+      if (errGuardar) return next(errGuardar);
+      auditoria.registrar('login', 'exito', { req, usuario: email });
+      return res.json({ usuario: { nombre: usuario.nombre, rol: usuario.rol }, csrfToken: req.session.csrfToken });
+    });
   });
 }
 
 /** POST /api/admin/logout — destruye la sesión y borra la cookie. */
 function logout(req, res, next) {
+  const quien = req.session?.usuario?.id;
   req.session.destroy((err) => {
     if (err) return next(err);
     res.clearCookie(config.sesion.nombreCookie, { httpOnly: true, sameSite: 'lax', secure: config.sesion.cookieSecure, path: '/' });
+    if (quien) auditoria.registrar('logout', 'exito', { req, usuario: quien });
     return res.json({ ok: true });
   });
 }

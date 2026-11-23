@@ -2,7 +2,8 @@
 const express = require('express');
 const auth = require('../controllers/auth.controller');
 const a = require('../controllers/admin.controller');
-const { requiereAdmin } = require('../middlewares/auth');
+const usuarios = require('../controllers/usuarios.controller');
+const { requiereAdmin, requiereRol } = require('../middlewares/auth');
 const { limiteLogin } = require('../middlewares/limitadores');
 const { validarImagen } = require('../middlewares/subida');
 
@@ -14,6 +15,11 @@ router.post('/logout', auth.logout);
 
 // El CSRF y el análisis de formularios multipart ya se resolvieron en el middleware global de CSRF.
 router.use(requiereAdmin);
+
+// Cuentas de dueños de restaurante: acción reservada al rol superadmin (ASVS V8.2.1)
+router.get('/usuarios', requiereRol('superadmin'), usuarios.listar);
+router.post('/usuarios', requiereRol('superadmin'), usuarios.crear);
+router.patch('/usuarios/:id', requiereRol('superadmin'), usuarios.cambiarEstado);
 
 // Restaurantes (los formularios con imagen llegan como multipart/form-data)
 router.get('/restaurantes', a.listaRestaurantes);

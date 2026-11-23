@@ -40,14 +40,16 @@ describe('panel: control de acceso', () => {
     expect(res.status).toBe(401);
   });
 
-  test('un cliente (rol distinto de admin) no puede usar el panel aunque tenga sesión', async () => {
-    // se simula una sesión con otro rol directamente en la tabla de sesiones
+  test('un cliente (rol sin acceso al panel) no puede usar el panel aunque tenga una sesión creada a mano', async () => {
+    // se fabrica una sesión a nombre de la cuenta "cliente": el servidor consulta el rol REAL en la base de datos en cada petición
     const agente = nuevoAgente();
     await agente.get('/api/sesion');
-    await query(`UPDATE sesiones SET sess = jsonb_set(sess::jsonb, '{usuario}', '{"id": 2, "nombre": "Cliente", "rol": "cliente"}')::json
-                  WHERE sid = (SELECT sid FROM sesiones ORDER BY expire DESC LIMIT 1)`);
+    const { rows: [cliente] } = await query("SELECT id FROM usuarios WHERE rol = 'cliente' LIMIT 1");
+    await query(`UPDATE sesiones SET sess = jsonb_set(sess::jsonb, '{usuario}', $1::jsonb)::json
+                  WHERE sid = (SELECT sid FROM sesiones ORDER BY expire DESC LIMIT 1)`,
+    [JSON.stringify({ id: cliente.id, nombre: 'Cliente', rol: 'admin' })]); // la sesión DICE admin, la base dice cliente
     const res = await agente.get('/api/admin/restaurantes');
-    expect([401, 403]).toContain(res.status);
+    expect(res.status).toBe(403);
   });
 
   test('un DELETE de administrador sin token CSRF se rechaza y no borra nada', async () => {

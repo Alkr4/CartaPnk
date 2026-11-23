@@ -21,16 +21,17 @@ async function primerActivoId() {
 
 // ------------------------------------------------------------------ administración
 
-/** Listado del panel con totales. */
-async function listarAdmin() {
+/** Listado del panel con totales. `propietarioId` = null lista todos (superadmin); un id lista sólo los de ese dueño. */
+async function listarAdmin(propietarioId = null) {
   const { rows } = await query(
     `SELECT r.id, r.nombre, r.fono, r.email, r.foto, d.calle, d.numero, d.comuna,
             (SELECT count(*) FROM cartas c WHERE c.restaurante_id = r.id AND c.eliminada IS NULL)::int AS cartas,
             (SELECT count(*) FROM comentarios x WHERE x.restaurante_id = r.id)::int AS comentarios
        FROM restaurantes r
        JOIN direcciones d ON d.id = r.direccion_id
-      WHERE r.eliminado IS NULL
+      WHERE r.eliminado IS NULL AND ($1::int IS NULL OR r.propietario_id = $1)
       ORDER BY r.id`,
+    [propietarioId],
   );
   return rows;
 }
@@ -38,7 +39,7 @@ async function listarAdmin() {
 /** Todos los datos editables de un restaurante activo. */
 async function obtenerAdmin(id) {
   const { rows } = await query(
-    `SELECT r.id, r.rut, r.nombre, r.fono, r.email, r.foto, r.direccion_id,
+    `SELECT r.id, r.rut, r.nombre, r.fono, r.email, r.foto, r.direccion_id, r.propietario_id,
             d.calle, d.numero, d.comuna, d.region
        FROM restaurantes r
        JOIN direcciones d ON d.id = r.direccion_id
@@ -48,17 +49,23 @@ async function obtenerAdmin(id) {
   return rows[0] ?? null;
 }
 
+/** Dueño de un restaurante activo: id del propietario (puede ser null), o undefined si el restaurante no existe. */
+async function propietarioDe(id) {
+  const { rows } = await query('SELECT propietario_id FROM restaurantes WHERE id = $1 AND eliminado IS NULL', [id]);
+  return rows[0] ? rows[0].propietario_id : undefined;
+}
+
 /** Crea la dirección y el restaurante en una sola transacción. Devuelve el id nuevo. */
-function crear(v) {
+function crear(v, propietarioId) {
   return transaccion(async (c) => {
     const dir = await c.query(
       'INSERT INTO direcciones (calle, numero, comuna, region) VALUES ($1, $2, $3, $4) RETURNING id',
       [v.calle, v.numero, v.comuna, v.region],
     );
     const res = await c.query(
-      `INSERT INTO restaurantes (rut, nombre, fono, email, direccion_id)
-            VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [v.rut, v.nombre, v.fono, v.email, dir.rows[0].id],
+      `INSERT INTO restaurantes (rut, nombre, fono, email, direccion_id, propietario_id)
+            VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [v.rut, v.nombre, v.fono, v.email, dir.rows[0].id, propietarioId],
     );
     return res.rows[0].id;
   });
@@ -90,4 +97,4 @@ async function eliminar(id) {
   return rowCount > 0;
 }
 
-module.exports = { buscarPorId, primerActivoId, listarAdmin, obtenerAdmin, crear, actualizar, actualizarFoto, eliminar };
+module.exports = { buscarPorId, primerActivoId, listarAdmin, obtenerAdmin, propietarioDe, crear, actualizar, actualizarFoto, eliminar };

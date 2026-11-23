@@ -1,5 +1,7 @@
 'use strict';
+const os = require('node:os');
 const express = require('express');
+const config = require('../config');
 const auth = require('../controllers/auth.controller');
 const carta = require('../controllers/carta.controller');
 const carrito = require('../controllers/carrito.controller');
@@ -11,6 +13,14 @@ const router = express.Router();
 router.use(sinCacheNiIndexar);
 
 router.get('/sesion', auth.sesion);
+
+/**
+ * GET /api/version — qué versión está publicada y QUÉ instancia respondió. Es dinámica y sin caché (sirve para comprobar un despliegue
+ * desde el dominio y para observar el balanceador al retirar un destino).
+ */
+router.get('/version', (req, res) => {
+  res.json({ version: config.version, commit: config.commit, ambiente: config.ambiente, instancia: os.hostname(), hora: new Date().toISOString() });
+});
 
 // Carta digital (público: no hay login para los clientes)
 router.get('/restaurantes/primero', carta.primero);

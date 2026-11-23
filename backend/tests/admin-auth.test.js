@@ -51,7 +51,7 @@ describe('acceso al panel /api/admin (VUL-02, 09, 15, 16, 17)', () => {
     const sidAntes = antes.headers['set-cookie'].find((c) => c.startsWith('pnk.sid=')).split(';')[0];
     const res = await iniciarSesion(agente);
     expect(res.status).toBe(200);
-    expect(res.body.usuario).toEqual({ nombre: expect.any(String), rol: 'admin' });
+    expect(res.body.usuario).toEqual({ nombre: expect.any(String), rol: 'superadmin' });
     expect(res.body.csrfToken).not.toBe(antes.body.csrfToken);
     const sidDespues = res.headers['set-cookie'].find((c) => c.startsWith('pnk.sid=')).split(';')[0];
     expect(sidDespues).not.toBe(sidAntes);
@@ -63,7 +63,7 @@ describe('acceso al panel /api/admin (VUL-02, 09, 15, 16, 17)', () => {
   test('con sesión de admin, /api/sesion lo informa (el frontend muestra la barra de administrador)', async () => {
     const { agente } = await adminConToken();
     const sesion = await agente.get('/api/sesion');
-    expect(sesion.body.usuario.rol).toBe('admin');
+    expect(sesion.body.usuario.rol).toBe('superadmin');
   });
 
   test('las contraseñas se guardan con hash bcrypt, nunca en texto plano, y existe el rol', async () => {
@@ -71,7 +71,7 @@ describe('acceso al panel /api/admin (VUL-02, 09, 15, 16, 17)', () => {
     expect(rows.length).toBeGreaterThan(0);
     for (const { password_hash: h, rol } of rows) {
       expect(h).toMatch(/^\$2[aby]\$\d{2}\$/);
-      expect(['admin', 'cliente']).toContain(rol);
+      expect(['superadmin', 'admin', 'cliente']).toContain(rol);
     }
   });
 

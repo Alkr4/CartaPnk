@@ -30,6 +30,7 @@ function validarCampo(def, bruto) {
 
   // texto / email
   if (def.max !== undefined && t.length > def.max) return { error: `${etiqueta} no puede superar ${def.max} caracteres` };
+  if (def.minimo !== undefined && t.length < def.minimo) return { error: `${etiqueta} debe tener al menos ${def.minimo} caracteres` };
   if (def.tipo === 'email' && !RE_EMAIL.test(t)) return { error: `${etiqueta} no es un correo válido` };
   if (def.patron && !def.patron.test(t)) return { error: def.mensajePatron ?? `${etiqueta} no tiene un formato válido` };
   return { valor: t };

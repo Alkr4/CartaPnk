@@ -14,7 +14,9 @@ const { pool, query } = require('../src/db/pool');
 const bool = (v) => ['1', 'true', 'si', 'yes'].includes(String(v ?? '').toLowerCase());
 
 const USUARIOS_DEMO = [
-  { nombre: 'Administrador', email: 'admin@gmail.com', password: 'admin01', rol: 'admin' },
+  { nombre: 'Administrador', email: 'admin@gmail.com', password: 'admin01', rol: 'superadmin' },
+  { nombre: 'Dueño Uno', email: 'dueno1@gmail.com', password: 'dueno101', rol: 'admin' },
+  { nombre: 'Dueño Dos', email: 'dueno2@gmail.com', password: 'dueno201', rol: 'admin' },
   { nombre: 'Alondra', email: 'alondra@gmail.com', password: 'alondra01', rol: 'cliente' },
 ];
 
@@ -60,13 +62,16 @@ async function sembrarConBloqueo(env) {
 
   if (env.ADMIN_EMAIL && env.ADMIN_PASSWORD) {
     if (env.ADMIN_PASSWORD.length < 12) throw new Error('ADMIN_PASSWORD debe tener al menos 12 caracteres');
-    if (await crearUsuario({ nombre: env.ADMIN_NOMBRE || 'Administrador', email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD, rol: 'admin' })) {
-      console.log(`[seed] administrador creado: ${env.ADMIN_EMAIL}`);
+    if (await crearUsuario({ nombre: env.ADMIN_NOMBRE || 'Administrador', email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD, rol: 'superadmin' })) {
+      console.log(`[seed] superadministrador creado: ${env.ADMIN_EMAIL}`);
     } else {
-      // si el correo ya existía (p. ej. creado antes de existir los roles) se garantiza que sea administrador
-      await query("UPDATE usuarios SET rol = 'admin' WHERE lower(email) = lower($1) AND rol <> 'admin'", [env.ADMIN_EMAIL]);
+      // si el correo ya existía se garantiza que sea superadmin (la cuenta que se declara por variables es la de mayor privilegio)
+      await query("UPDATE usuarios SET rol = 'superadmin' WHERE lower(email) = lower($1) AND rol <> 'superadmin'", [env.ADMIN_EMAIL]);
     }
   }
+
+  // Los restaurantes sin propietario (catálogo de ejemplo) quedan a nombre del superadmin.
+  await query("UPDATE restaurantes SET propietario_id = (SELECT min(id) FROM usuarios WHERE rol = 'superadmin') WHERE propietario_id IS NULL");
 }
 
 module.exports = { sembrar, USUARIOS_DEMO };

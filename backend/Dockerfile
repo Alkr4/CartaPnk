@@ -46,6 +46,11 @@ FROM base AS produccion
 ENV NODE_ENV=production \
     APP_ENV=production \
     PORT=3000
+# Versión que identifica a esta imagen (la inyecta el pipeline con --build-arg); se expone en /api/version y /salud
+ARG APP_VERSION=desarrollo
+ARG GIT_COMMIT=desconocido
+ENV APP_VERSION=${APP_VERSION} \
+    GIT_COMMIT=${GIT_COMMIT}
 COPY --from=deps-produccion /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
