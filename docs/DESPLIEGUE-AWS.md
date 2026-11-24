@@ -154,11 +154,29 @@ Construye imágenes nuevas (etiqueta distinta), las sube y CloudFormation **reem
 ### 3.8 Destruir todo
 
 ```bash
-./scripts/desplegar.sh down          # pide confirmación; conserva el repositorio ECR
-./scripts/desplegar.sh down --ecr    # además borra las imágenes
+./scripts/desplegar.sh down                 # pide confirmación; los DATOS se conservan (ver 3.9)
+./scripts/desplegar.sh down --ecr           # además borra las imágenes de ECR
+./scripts/desplegar.sh down --sin-respaldo  # borra también los respaldos y el bucket de imágenes (irrecuperable)
 ```
 
-Tarda ~10 minutos. **Elimina la base de datos y sus datos.**
+Tarda ~10-15 minutos. Destruye red, balanceador, instancias y la base, pero **no los datos**: ver 3.9.
+
+### 3.9 Respaldos: los datos sobreviven a `down`
+
+| Qué | Cómo se conserva | Al recrear la pila |
+|---|---|---|
+| Base de datos (RDS) | `DeletionPolicy: Snapshot`: AWS saca una **instantánea final** antes de borrarla; la instantánea no pertenece a la pila | `publicar`/`up` busca la instantánea más reciente de la pila y crea la base desde ella (parámetro `DbSnapshotId`) |
+| Imágenes (S3) | `DeletionPolicy: Retain`: el bucket no se borra | se reutiliza el bucket conservado más reciente (parámetro `MediaBucketExistente`) |
+
+```bash
+./scripts/desplegar.sh respaldo    # instantánea a pedido (p. ej. antes de publicar una versión)
+./scripts/desplegar.sh respaldos   # lista instantáneas y buckets conservados
+```
+
+- La base restaurada conserva su contraseña: **guarde la carpeta `.despliegue/`** (no está en Git). Si falta, el script se detiene con código 2 en vez de crear una pila que no podría conectarse.
+- `PNK_SIN_RESTAURAR=1` crea la pila vacía aunque existan respaldos; `PNK_SNAPSHOT=<id>` restaura uno concreto.
+- En una pila existente el respaldo de origen nunca se cambia (hacerlo reemplazaría la base).
+- Costo: las instantáneas se cobran por GB almacenado (centavos al mes para esta base), mucho menos que la base encendida.
 
 ## 4. Qué hace la aplicación al arrancar en cada instancia
 

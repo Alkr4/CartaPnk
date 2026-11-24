@@ -118,6 +118,19 @@ Parameters:
     Description: >-
       ARN de un certificado de ACM (de su dominio). Si se indica, el balanceador agrega un listener HTTPS :443
       (el :80 sigue disponible para pruebas de salud). Vacío = sólo HTTP.
+  DbSnapshotId:
+    Type: String
+    Default: ""
+    Description: >-
+      Respaldo (instantánea de RDS) desde el que se crea la base. Vacío = base nueva. desplegar.sh lo completa solo con el
+      último respaldo de esta pila al recrearla. OJO: cambiarlo en una pila existente REEMPLAZA la base.
+  MediaBucketExistente:
+    Type: String
+    Default: ""
+    AllowedPattern: "^[a-z0-9.-]{0,63}$"
+    Description: >-
+      Bucket de imágenes conservado de una pila anterior (DeletionPolicy Retain). Vacío = se crea uno nuevo.
+      desplegar.sh lo completa solo al recrear la pila.
   LatestAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
@@ -126,6 +139,8 @@ Parameters:
 # ---------------------------------------------------------------------------------------------------------------------
 Conditions:
   HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
+  RestaurarRespaldo: !Not [!Equals [!Ref DbSnapshotId, ""]]
+  CrearBucket: !Equals [!Ref MediaBucketExistente, ""]
 
 # ---------------------------------------------------------------------------------------------------------------------
 Resources:
@@ -252,8 +267,10 @@ Resources:
 
   Database:
     Type: AWS::RDS::DBInstance
-    DeletionPolicy: Delete # laboratorio: no dejar instantáneas huérfanas que sigan costando
-    UpdateReplacePolicy: Delete
+    # Al destruir la pila (desplegar.sh down) o si una actualización reemplazara la base, AWS saca antes una instantánea
+    # final que NO pertenece a la pila: los datos sobreviven y la pila siguiente se crea desde ella (parámetro DbSnapshotId).
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
     Metadata:
       cfn-lint:
         config:
@@ -266,15 +283,18 @@ Resources:
       DBInstanceClass: !Ref DbInstanceClass
       AllocatedStorage: !Ref DbAllocatedStorage
       StorageType: gp3
-      StorageEncrypted: true
-      DBName: pnk_prod
-      MasterUsername: pnk
-      MasterUserPassword: !Ref DbPassword
+      # al restaurar un respaldo, nombre, usuario, contraseña y cifrado vienen de la instantánea (la contraseña es la de
+      # .despliegue/secretos.env, por eso desplegar.sh exige conservar esa carpeta para restaurar)
+      DBSnapshotIdentifier: !If [RestaurarRespaldo, !Ref DbSnapshotId, !Ref AWS::NoValue]
+      StorageEncrypted: !If [RestaurarRespaldo, !Ref AWS::NoValue, true]
+      DBName: !If [RestaurarRespaldo, !Ref AWS::NoValue, pnk_prod]
+      MasterUsername: !If [RestaurarRespaldo, !Ref AWS::NoValue, pnk]
+      MasterUserPassword: !If [RestaurarRespaldo, !Ref AWS::NoValue, !Ref DbPassword]
       DBSubnetGroupName: !Ref DbSubnetGroup
       VPCSecurityGroups: [!Ref DbSecurityGroup]
       PubliclyAccessible: false
       MultiAZ: !Ref DbMultiAz # "true": réplica en espera sincrónica en otra zona de disponibilidad con conmutación automática
-      BackupRetentionPeriod: 0 # laboratorio; para producción real: 7 o más
+      BackupRetentionPeriod: 0 # sin respaldos automáticos diarios (laboratorio); respaldos: instantánea final + desplegar.sh respaldo
       DeletionProtection: false
       AutoMinorVersionUpgrade: true
       Tags: [{ Key: Name, Value: cartapnk-db }]
@@ -335,8 +355,9 @@ Resources:
   # Es compartido por todas las instancias del Auto Scaling (el disco de cada una es distinto y se pierde al reemplazarla).
   MediaBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Delete          # entorno de laboratorio: al destruir la pila se elimina (vacíelo antes: desplegar.sh down lo hace)
-    UpdateReplacePolicy: Delete
+    Condition: CrearBucket
+    DeletionPolicy: Retain          # las imágenes sobreviven a "desplegar.sh down"; la pila siguiente reutiliza el bucket
+    UpdateReplacePolicy: Retain
     Properties:
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
@@ -352,14 +373,16 @@ Resources:
   MediaBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref MediaBucket
+      Bucket: !If [CrearBucket, !Ref MediaBucket, !Ref MediaBucketExistente]
       PolicyDocument:
         Statement:
           - Sid: SoloHttps
             Effect: Deny
             Principal: "*"
             Action: "s3:*"
-            Resource: [!GetAtt MediaBucket.Arn, !Sub "${MediaBucket.Arn}/*"]
+            Resource:
+              - !Sub ["arn:${AWS::Partition}:s3:::${B}", { B: !If [CrearBucket, !Ref MediaBucket, !Ref MediaBucketExistente] }]
+              - !Sub ["arn:${AWS::Partition}:s3:::${B}/*", { B: !If [CrearBucket, !Ref MediaBucket, !Ref MediaBucketExistente] }]
             Condition: { Bool: { "aws:SecureTransport": "false" } }
 
   # ---------------------------------------------------------------- Instancias (plantilla de lanzamiento + Auto Scaling)
@@ -406,7 +429,7 @@ Resources:
                 ADMIN_EMAIL=${AdminEmail}
                 ADMIN_PASSWORD=${AdminPassword}
                 STORAGE_DRIVER=s3
-                S3_BUCKET=${MediaBucket}
+                S3_BUCKET=${Bucket}
                 AWS_REGION=${AWS::Region}
                 ENV
                 umask 022
@@ -428,6 +451,7 @@ Resources:
                   --log-opt max-size=10m --log-opt max-file=3 ${FrontImageUri}
               - Registry: !Select [0, !Split ["/", !Ref BackImageUri]]
                 DbHost: !GetAtt Database.Endpoint.Address
+                Bucket: !If [CrearBucket, !Ref MediaBucket, !Ref MediaBucketExistente]
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -489,7 +513,7 @@ Outputs:
     Value: !GetAtt Database.Endpoint.Address
   MediaBucketName:
     Description: Bucket S3 (privado) con las imágenes subidas desde el panel de administración
-    Value: !Ref MediaBucket
+    Value: !If [CrearBucket, !Ref MediaBucket, !Ref MediaBucketExistente]
   AutoScalingGroupName:
     Value: !Ref AutoScalingGroup
   TargetGroupArn:

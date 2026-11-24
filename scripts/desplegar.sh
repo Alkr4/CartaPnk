@@ -11,7 +11,10 @@
 #   ./scripts/desplegar.sh cloudflare [<dom>] [--reemplazar]  crea/corrige los DNS en Cloudflare (API) y aplica ajustes de la zona; requiere CLOUDFLARE_API_TOKEN
 #   ./scripts/desplegar.sh tunel              publica la URL con un túnel TEMPORAL de Cloudflare (trycloudflare.com)
 #   ./scripts/desplegar.sh carga              genera tráfico para demostrar el Auto Scaling
-#   ./scripts/desplegar.sh down [--ecr]       DESTRUYE la infraestructura (pide confirmación; --ecr borra también las imágenes)
+#   ./scripts/desplegar.sh down [--ecr] [--sin-respaldo]  DESTRUYE la infraestructura; la base queda en una instantánea final y el
+#                                             bucket de imágenes se conserva (--sin-respaldo borra también eso; --ecr, las imágenes)
+#   ./scripts/desplegar.sh respaldo           saca ahora una instantánea (respaldo) de la base de datos
+#   ./scripts/desplegar.sh respaldos          lista los respaldos y buckets conservados que se usarán al recrear la pila
 #   ./scripts/desplegar.sh construir <version>            construye y publica en ECR las imágenes de esa versión (CI)
 #   ./scripts/desplegar.sh publicar <ambiente> <version>  despliega la versión en pruebas|produccion y verifica el servicio (CI)
 #   ./scripts/desplegar.sh revertir <ambiente>            vuelve a la versión anterior de ese ambiente
@@ -22,7 +25,8 @@
 # Requisitos: bash, AWS CLI v2 con credenciales válidas, Docker, openssl y curl.
 # Variables opcionales: PNK_STACK, PNK_ECR_REPO, PNK_ADMIN_EMAIL, PNK_INSTANCE_TYPE, PNK_ASG_MIN, PNK_ASG_DESIRED,
 #                       PNK_ASG_MAX, PNK_COOKIE_SECURE, PNK_TRUST_PROXY, PNK_IMAGE_TAG, PNK_DB_ENGINE_VERSION, PNK_DB_CLASS,
-#                       PNK_INSTANCE_PROFILE, PNK_SEED_CATALOGO (true = cargar los 7 restaurantes de ejemplo), PNK_DB_MULTIAZ (false = RDS sin réplica), AWS_REGION
+#                       PNK_INSTANCE_PROFILE, PNK_SEED_CATALOGO (true = cargar los 7 restaurantes de ejemplo), PNK_DB_MULTIAZ (false = RDS sin réplica), AWS_REGION,
+#                       PNK_SIN_RESTAURAR=1 (pila con base y bucket NUEVOS aunque existan respaldos), PNK_SNAPSHOT=<id> (respaldo concreto)
 # =====================================================================================================================
 set -Eeuo pipefail
 
@@ -175,6 +179,76 @@ eventos_fallidos() {
     --query "StackEvents[?contains(ResourceStatus,'FAILED')].[LogicalResourceId,ResourceStatusReason]" --output text 2>/dev/null | head -n 12 | sed 's/^/     /' || true
 }
 
+# ------------------------------------------------------------------------------------------------ respaldos
+# La base tiene DeletionPolicy: Snapshot (al destruir la pila queda una instantánea final) y el bucket de imágenes, Retain.
+# Ambos se reconocen por el nombre de la pila: instancias "<pila>-database-…" y buckets "<pila>-mediabucket-…".
+prefijo_pila() { tr '[:upper:]' '[:lower:]' <<<"${STACK}"; }
+
+ultimo_respaldo() { # instantánea disponible más reciente de la base de esta pila (o vacío)
+  local r
+  r="$(aws rds describe-db-snapshots --query "reverse(sort_by(DBSnapshots[?Status=='available' && starts_with(DBInstanceIdentifier, '$(prefijo_pila)-database-')], &SnapshotCreateTime))[0].DBSnapshotIdentifier" --output text 2>/dev/null || true)"
+  [ "${r}" = "None" ] || echo "${r}"
+}
+
+ultimo_bucket() { # bucket de imágenes conservado más reciente de esta pila (o vacío)
+  local b
+  b="$(aws s3api list-buckets --query "reverse(sort_by(Buckets[?starts_with(Name, '$(prefijo_pila)-mediabucket-')], &CreationDate))[0].Name" --output text 2>/dev/null || true)"
+  [ "${b}" = "None" ] || echo "${b}"
+}
+
+parametro_pila() { # valor actual de un parámetro de la pila (vacío si no existe)
+  local v
+  v="$(aws cloudformation describe-stacks --stack-name "${STACK}" --query "Stacks[0].Parameters[?ParameterKey=='$1'].ParameterValue" --output text 2>/dev/null || true)"
+  [ "${v}" = "None" ] || echo "${v}"
+}
+
+# Deja RESPALDO_DB y RESPALDO_BUCKET. En una pila que ya existe se conservan sus valores (cambiar el respaldo REEMPLAZARÍA la base).
+elegir_respaldo() {
+  if [ "$(estado_pila)" != "NO_EXISTE" ]; then
+    RESPALDO_DB="$(parametro_pila DbSnapshotId)"
+    RESPALDO_BUCKET="$(parametro_pila MediaBucketExistente)"
+    return
+  fi
+  RESPALDO_DB=""; RESPALDO_BUCKET=""
+  if [ "${PNK_SIN_RESTAURAR:-0}" = "1" ]; then
+    aviso "PNK_SIN_RESTAURAR=1: la base y el bucket de imágenes se crean vacíos (los respaldos existentes no se tocan)"
+    return
+  fi
+  RESPALDO_DB="${PNK_SNAPSHOT:-$(ultimo_respaldo)}"
+  RESPALDO_BUCKET="$(ultimo_bucket)"
+  if [ -n "${RESPALDO_DB}" ]; then
+    # la base restaurada conserva la contraseña con la que se creó: debe ser la de .despliegue/secretos.env
+    if [ "${SECRETOS_NUEVOS:-0}" = "1" ]; then
+      terminar 2 "Existe el respaldo ${RESPALDO_DB}, pero .despliegue/secretos.env es NUEVO: la base restaurada no aceptaría la contraseña. Copie la carpeta .despliegue del despliegue anterior, o use PNK_SIN_RESTAURAR=1 para partir de cero."
+    fi
+    ok "la base se restaura desde el respaldo ${RESPALDO_DB}"
+  else
+    aviso "no hay respaldos de la base: se crea vacía"
+  fi
+  if [ -n "${RESPALDO_BUCKET}" ]; then ok "se reutiliza el bucket de imágenes ${RESPALDO_BUCKET}"; fi
+}
+
+cmd_respaldo() {
+  requisitos
+  local db id
+  db="$(aws cloudformation describe-stack-resource --stack-name "${STACK}" --logical-resource-id Database --query StackResourceDetail.PhysicalResourceId --output text 2>/dev/null || true)"
+  { [ -n "${db}" ] && [ "${db}" != "None" ]; } || terminar 2 "La pila '${STACK}' no tiene base de datos (¿existe?)"
+  id="$(prefijo_pila)-respaldo-$(date -u +%Y%m%d-%H%M%S)"
+  paso "Respaldo de ${db} -> ${id}"
+  aws rds create-db-snapshot --db-instance-identifier "${db}" --db-snapshot-identifier "${id}" >/dev/null || terminar 1 "No se pudo crear el respaldo"
+  aviso "Esperando a que el respaldo quede disponible (algunos minutos)…"
+  aws rds wait db-snapshot-available --db-snapshot-identifier "${id}" || terminar 1 "El respaldo ${id} no quedó disponible"
+  ok "respaldo listo: ${id}"
+}
+
+cmd_respaldos() {
+  requisitos
+  paso "Respaldos de la base (pila ${STACK}; el más reciente se usa al recrearla)"
+  aws rds describe-db-snapshots --query "reverse(sort_by(DBSnapshots[?starts_with(DBInstanceIdentifier, '$(prefijo_pila)-database-')], &SnapshotCreateTime))[].[SnapshotCreateTime,DBSnapshotIdentifier,Status,AllocatedStorage]" --output table
+  paso "Buckets de imágenes conservados"
+  aws s3api list-buckets --query "Buckets[?starts_with(Name, '$(prefijo_pila)-mediabucket-')].[CreationDate,Name]" --output table
+}
+
 desplegar_pila() {
   paso "Creando/actualizando la infraestructura (CloudFormation: pila '${STACK}')"
   aviso "La primera vez tarda ~10-15 minutos (la base de datos RDS es lo más lento). No cierre la terminal."
@@ -190,6 +264,7 @@ desplegar_pila() {
       || die "El certificado ${cert} está en estado '${estado_cert}'. Complete la validación DNS en Cloudflare (./scripts/desplegar.sh certificado <dominio>) antes de desplegar con HTTPS."
     ok "HTTPS activado con el certificado de ACM (cookie Secure: ${cookie_secure})"
   fi
+  elegir_respaldo
   local params=(
     "BackImageUri=${IMAGEN_BACK}"
     "FrontImageUri=${IMAGEN_FRONT}"
@@ -205,6 +280,8 @@ desplegar_pila() {
     "TrustProxy=${PNK_TRUST_PROXY:-3}"
     "SeedCatalogo=${PNK_SEED_CATALOGO:-false}"
     "DbMultiAz=${PNK_DB_MULTIAZ:-true}"
+    "DbSnapshotId=${RESPALDO_DB}"
+    "MediaBucketExistente=${RESPALDO_BUCKET}"
   )
   [ -z "${cert}" ] || params+=("CertificateArn=${cert}")
   # ajustes opcionales según lo que permita su laboratorio
@@ -859,10 +936,14 @@ cmd_carga() {
 }
 
 cmd_down() {
-  local borrar_ecr=0 si=0
-  for a in "$@"; do case "${a}" in --ecr) borrar_ecr=1;; --yes|-y) si=1;; *) die "Opción desconocida: ${a}";; esac; done
+  local borrar_ecr=0 si=0 sin_respaldo=0
+  for a in "$@"; do case "${a}" in --ecr) borrar_ecr=1;; --yes|-y) si=1;; --sin-respaldo) sin_respaldo=1;; *) die "Opción desconocida: ${a}";; esac; done
   requisitos
-  paso "Se va a DESTRUIR la pila '${STACK}' (RDS con todos sus datos, balanceador, instancias y red)"
+  if [ "${sin_respaldo}" -eq 1 ]; then
+    paso "Se va a DESTRUIR la pila '${STACK}' Y SUS RESPALDOS (base, imágenes, balanceador, instancias y red): no se podrá recuperar"
+  else
+    paso "Se va a DESTRUIR la pila '${STACK}' (balanceador, instancias, red y base). Los datos se conservan: instantánea final de la base + bucket de imágenes"
+  fi
   if [ "${si}" -ne 1 ]; then
     read -r -p "  Escriba 'si' para continuar: " resp
     [ "${resp}" = "si" ] || { echo "  Cancelado."; return 0; }
@@ -870,16 +951,21 @@ cmd_down() {
   if [ "$(estado_pila)" = "NO_EXISTE" ]; then
     ok "la pila no existe (nada que borrar)"
   else
-    # CloudFormation no puede borrar un bucket con objetos: se vacía primero (las imágenes subidas se pierden)
-    local bucket
-    bucket="$(salida_pila MediaBucketName || true)"
-    if [ -n "${bucket}" ] && [ "${bucket}" != "None" ]; then
-      aws s3 rm "s3://${bucket}" --recursive >/dev/null 2>&1 && ok "bucket S3 '${bucket}' vaciado" || aviso "no se pudo vaciar el bucket '${bucket}' (¿ya estaba vacío?)"
-    fi
     aws cloudformation delete-stack --stack-name "${STACK}"
-    aviso "Eliminando… tarda ~10 minutos (RDS)."
+    aviso "Eliminando… tarda ~10-15 minutos (RDS saca antes la instantánea final)."
     aws cloudformation wait stack-delete-complete --stack-name "${STACK}"
     ok "pila eliminada"
+  fi
+  if [ "${sin_respaldo}" -eq 1 ]; then
+    local r b
+    for r in $(aws rds describe-db-snapshots --query "DBSnapshots[?starts_with(DBInstanceIdentifier, '$(prefijo_pila)-database-')].DBSnapshotIdentifier" --output text); do
+      aws rds delete-db-snapshot --db-snapshot-identifier "${r}" >/dev/null && ok "respaldo ${r} eliminado"
+    done
+    for b in $(aws s3api list-buckets --query "Buckets[?starts_with(Name, '$(prefijo_pila)-mediabucket-')].Name" --output text); do
+      aws s3 rb "s3://${b}" --force >/dev/null && ok "bucket ${b} eliminado"
+    done
+  else
+    ok "datos conservados (ver: ./scripts/desplegar.sh respaldos). Al recrear la pila se restauran solos."
   fi
   if [ "${borrar_ecr}" -eq 1 ]; then
     aws ecr delete-repository --repository-name "${REPO}" --force >/dev/null 2>&1 && ok "repositorio ECR '${REPO}' eliminado" || aviso "no había repositorio ECR '${REPO}'"
@@ -888,7 +974,7 @@ cmd_down() {
   fi
 }
 
-uso() { sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+uso() { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 main() {
   local cmd="${1:-}"; shift || true
@@ -905,6 +991,8 @@ main() {
     tunel) cmd_tunel ;;
     carga) cmd_carga ;;
     down) cmd_down "$@" ;;
+    respaldo) cmd_respaldo ;;
+    respaldos) cmd_respaldos ;;
     certificado) cmd_certificado "$@" ;;
     dominio) cmd_dominio "$@" ;;
     cloudflare) cmd_cloudflare "$@" ;;
