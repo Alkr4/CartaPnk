@@ -28,8 +28,10 @@ RUN npm ci --no-audit --no-fund
 # ---------------------------------------------------------------- DESARROLLO
 FROM deps-completas AS desarrollo
 ENV APP_ENV=development
-COPY . .
-RUN chmod +x docker/entrypoint.sh
+COPY --chown=node:node . .
+# también en desarrollo y QA se corre como usuario sin privilegios (Semgrep: dockerfile.security.missing-user)
+RUN chmod +x docker/entrypoint.sh && mkdir -p uploads && chown node:node uploads
+USER node
 EXPOSE 3000
 ENTRYPOINT ["/sbin/tini", "--", "/app/docker/entrypoint.sh"]
 CMD ["npm", "run", "dev"]
@@ -37,7 +39,9 @@ CMD ["npm", "run", "dev"]
 # ---------------------------------------------------------------- PRUEBAS (QA)
 FROM deps-completas AS pruebas
 ENV APP_ENV=test
-COPY . .
+COPY --chown=node:node . .
+RUN mkdir -p uploads reportes && chown node:node uploads reportes
+USER node
 # Falla (código distinto de 0) si el lint, alguna prueba o la auditoría de dependencias fallan.
 CMD ["sh", "-c", "npm run lint && npm test && npm run audit:deps"]
 
