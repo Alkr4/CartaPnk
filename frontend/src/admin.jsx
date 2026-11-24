@@ -56,6 +56,18 @@ function Pantalla({ titulo, children }) {
 
 const MAX_IMAGEN = 2 * 1024 * 1024;
 
+/** Mensaje en español para cada regla HTML que falla (el del navegador sale en el idioma del navegador). */
+function mensajeNativo(v, c) {
+  if (v.valueMissing) return 'Este campo es obligatorio';
+  if (v.badInput || v.stepMismatch) return 'Debe ser un número entero';
+  if (v.rangeUnderflow) return `Debe ser al menos ${c.min}`;
+  if (v.rangeOverflow) return `No puede superar ${c.tope}`;
+  if (v.tooShort) return `Debe tener al menos ${c.minimo} caracteres`;
+  if (v.tooLong) return `No puede superar ${c.max} caracteres`;
+  if (v.typeMismatch) return 'Formato no válido (p. ej. nombre@dominio.cl)';
+  return c.ayuda || 'Formato no válido';
+}
+
 /**
  * Un campo de texto/número con validación en el navegador: reglas HTML (required, min, max, pattern, maxlength), una
  * comprobación propia opcional (`c.validar(valor)` -> mensaje) y el error que devuelva la API, todo vía setCustomValidity.
@@ -68,7 +80,7 @@ function Campo({ c, valor, errorApi }) {
   const revisar = useCallback((el, deLaApi) => {
     const propio = !deLaApi && el.value && c.validar ? c.validar(el.value) : '';
     el.setCustomValidity(deLaApi || propio || '');
-    setMensaje(el.validity.valid ? '' : (deLaApi || propio || c.ayuda || el.validationMessage));
+    setMensaje(el.validity.valid ? '' : (deLaApi || propio || mensajeNativo(el.validity, c)));
   }, [c]);
   useEffect(() => { revisar(ref.current, errorApi); }, [errorApi, revisar]);
 

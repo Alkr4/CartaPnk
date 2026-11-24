@@ -274,6 +274,7 @@ test('panel: el navegador no envía un formulario inválido (obligatorios, RUT, 
   fireEvent.click(await screen.findByText('Guardar'));
   expect(container.querySelector('form').className).toContain('was-validated'); // Bootstrap pinta rojo/verde
   expect(container.querySelector('#f-nombre').validity.valueMissing).toBe(true);
+  expect(container.querySelector('#f-nombre-error').textContent).toBe('Este campo es obligatorio');
 
   llenarRestaurante({ rut: '76.123.456-7' }); // dígito verificador incorrecto
   fireEvent.click(screen.getByText('Guardar'));
@@ -291,9 +292,11 @@ test('panel: el navegador no envía un formulario inválido (obligatorios, RUT, 
   render(<Admin />);
   const precio = await screen.findByLabelText('Precio ($)');
   fireEvent.change(screen.getByLabelText(/^Nombre/), { target: { value: 'Plato' } });
-  for (const [valor, malo] of [['-500', true], ['1000001', true], ['0', true], ['5990', false]]) {
+  for (const [valor, mensaje] of [['-500', 'Debe ser al menos 1'], ['1000001', 'No puede superar 1000000'], ['0', 'Debe ser al menos 1'], ['5990', '']]) {
     fireEvent.change(precio, { target: { value: valor } });
-    expect(precio.validity.valid).toBe(!malo);
+    fireEvent.input(precio);
+    expect(precio.validity.valid).toBe(!mensaje);
+    if (mensaje) expect(document.querySelector('#f-precio-error').textContent).toBe(mensaje);
   }
   expect(precio.min).toBe('1');
   expect(precio.max).toBe('1000000');
