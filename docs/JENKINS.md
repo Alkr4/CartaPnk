@@ -1,88 +1,68 @@
-# Plan de CI/CD con Jenkins y seguridad (4.ª entrega)
+# Jenkins: CI/CD con controles de seguridad (4.ª entrega)
 
-Objetivo: que cada `git push` pase automáticamente por **calidad → seguridad → despliegue** y que los hallazgos de seguridad
-**rompan el pipeline** antes de llegar a producción. El archivo [`Jenkinsfile`](../Jenkinsfile) es el borrador listo para adaptar.
-
-> Estado: el `Jenkinsfile` **no se ha ejecutado** contra un Jenkins real (aquí no hay uno instalado). Las partes que dependen de la
-> versión de cada plugin están marcadas con `(*)`: valídelas con *Pipeline Syntax → Snippet Generator* de su Jenkins.
-
-## 1. Arquitectura propuesta
+Cada `git push` a la rama vigilada (`develop`) pasa por **controles de seguridad → pruebas → imágenes → publicación en AWS**.
+Si **un** control falla, el pipeline se detiene y **esa versión no se publica**; si todos pasan, `scripts/desplegar.sh publicar`
+la despliega en la pila `cartapnk` y verifica que el balanceador la esté sirviendo (si no, vuelve sola a la versión anterior).
 
 ```
-GitHub ──webhook──► Jenkins (EC2 #2, Docker) ──► pipeline ──► QA (contenedores efímeros) ──► aprobación ──► EC2 producción ──► Cloudflare
+GitHub (develop) ──(Jenkins revisa cada 2 min)──► Jenkins (EC2 t3.medium, Docker)
+   Versión ─► Gitleaks ─► Semgrep ─► npm audit ─► Lint+pruebas (QA) ─► Imágenes ─► Trivy ─► ZAP (QA) ─► Publicar en AWS
+                     cualquier etapa en rojo = versión BLOQUEADA                                        │
+                                                                         ECR ─► CloudFormation (rolling) ─► ALB ─► Cloudflare
 ```
 
-- **Jenkins** en su propio EC2 (recomendado ≥ 2 vCPU / 4 GB, p. ej. `t3.medium`) con Docker; así el servidor de producción no ejecuta herramientas de escaneo.
-  Instalación mínima: `docker run -d -p 8080:8080 -v jenkins_home:/var/jenkins_home -v /var/run/docker.sock:/var/run/docker.sock jenkins/jenkins:lts-jdk21`
-  (el agente necesita la CLI de Docker: use una imagen derivada que la incluya). Proteja el puerto 8080 en el Security Group (sólo su IP) o publíquelo con Cloudflare Tunnel + Access.
-- **Pipeline multibranch**: `develop` ejecuta hasta QA; `main` ejecuta además aprobación manual y despliegue a producción.
-- **Configuración como código** (plugin *Configuration as Code*): deje el Jenkins reproducible en un `jenkins.yaml` dentro del repositorio.
-- **Endurecer Jenkins** (también es un objetivo de ataque): registro de usuarios desactivado, autorización por matriz/roles, credenciales sólo en el almacén de Jenkins, agentes sin acceso a producción.
+## 1. Controles y umbrales
 
-## 2. Etapas del pipeline y qué control aporta
-
-| # | Etapa | Herramienta | Qué detecta | Criterio de fallo |
+| # | Etapa | Herramienta (contenedor, versión fija) | Qué detecta | Umbral que BLOQUEA |
 |---|---|---|---|---|
-| 1 | Secretos | **Gitleaks** | claves/contraseñas en el repositorio | cualquier hallazgo |
-| 2 | SAST | **Semgrep** (`p/owasp-top-ten`, `p/nodejs`) + ESLint con `eslint-plugin-security` | inyecciones, XSS, uso inseguro de APIs | cualquier hallazgo `error` |
-| 3 | SCA | **`npm audit`** y **OWASP Dependency-Check** (plugin) | dependencias con CVE conocidos | CVSS ≥ 9 falla; ≥ 7 deja el build inestable |
-| 4 | Calidad | Jest + Supertest en Docker (ambiente **QA**) | regresiones funcionales y de seguridad (CSRF, XSS, SQLi, sesión) | cualquier prueba roja |
-| 5 | Imagen | **Trivy** sobre la imagen `produccion` | CVE en el SO base y en las librerías | HIGH/CRITICAL con parche disponible |
-| 6 | DAST | **OWASP ZAP** baseline contra QA | cabeceras, cookies, XSS/SQLi reflejados | reglas `FAIL` de [`jenkins/zap-reglas.tsv`](../jenkins/zap-reglas.tsv) |
-| 7 | MITRE | [`backend/tools/mapear-mitre.js`](../backend/tools/mapear-mitre.js) | consolida los hallazgos por CWE → CAPEC → ATT&CK | informativo (artefacto `mitre.md`) |
-| 8 | Aprobación | `input` de Jenkins | — | un humano autoriza producción |
-| 9 | Despliegue | SSH al EC2 de producción + `docker compose` | — | prueba de humo `/salud` por Cloudflare |
+| 1 | Secretos | Gitleaks 8.21 sobre **todo el historial** | claves, tokens, contraseñas | cualquier hallazgo |
+| 2 | SAST | Semgrep (`p/owasp-top-ten`, `p/nodejs`, `p/javascript`) | inyecciones, XSS, Dockerfile inseguro… | severidad ERROR |
+| 3 | SCA | `npm audit` backend y frontend (producción) | dependencias con CVE | HIGH o CRITICAL |
+| 4 | Calidad y seguridad funcional | ESLint (`eslint-plugin-security`, anti-XSS), Vitest (24), Jest + Supertest contra PostgreSQL (165, incluye `tests/asvs.test.js`) | regresiones, controles ASVS (autorización, CSRF, sesión, validación…) | 1 prueba roja o 1 aviso de lint |
+| 5 | Imágenes | Trivy 0.58 sobre las imágenes `back` y `front` | CVE del sistema base y librerías | HIGH/CRITICAL **con parche** |
+| 6 | DAST | OWASP ZAP baseline contra QA en contenedores | cabeceras, cookies, CSP, filtración de versión | reglas `FAIL` de `jenkins/zap-reglas.tsv` |
+| 7 | Publicar | `desplegar.sh publicar pruebas <commit>` | servicio que no levanta o no sirve la versión | código ≠ 0 (y reversión automática) |
 
-El orden va de lo más barato a lo más caro: lo que se puede detectar leyendo código se detecta antes de construir imágenes o levantar contenedores.
+Cada etapa es un comando de [`jenkins/controles.sh`](../jenkins/controles.sh): se puede reproducir fuera de Jenkins con Docker,
+por ejemplo `./jenkins/controles.sh sast`. Los informes (SARIF/JSON/HTML) se archivan en cada ejecución (*Artefactos → reportes/*).
 
-## 3. Plugins de Jenkins
+Hallazgos reales que estos controles ya encontraron y se corrigieron: Semgrep detectó que las etapas `desarrollo` y `pruebas`
+del Dockerfile del backend corrían como root; Trivy bloqueó el npm incluido en la imagen de Node (CVE en `undici` y
+`brace-expansion`; se eliminó npm de la imagen de producción) y la imagen de Nginx 1.27 / 1.30.6 (se usa la rama mainline).
 
-| Plugin | Para qué |
-|---|---|
-| **OWASP Dependency-Check** (`dependency-check-jenkins-plugin`) | pasos `dependencyCheck` (escanea) y `dependencyCheckPublisher` (publica y aplica umbrales) |
-| **Warnings Next Generation** | muestra y compara en Jenkins los hallazgos de ESLint y de los informes **SARIF** (Semgrep, Gitleaks, Trivy) |
-| **HTML Publisher** | publica los informes HTML de ZAP y Dependency-Check |
-| **Docker Pipeline** | ejecutar etapas dentro de contenedores |
-| **Pipeline** (suite), **Git**, **GitHub / GitHub Branch Source** | pipeline como código, webhooks y ramas |
-| **Credentials Binding**, **SSH Agent** | credenciales fuera del código, despliegue por SSH |
-| **JUnit** (+ `jest-junit`) | tendencia de pruebas |
-| **Configuration as Code**, **Role-based Authorization Strategy** | Jenkins reproducible y con permisos |
-| *(opcional)* **SonarQube Scanner** | análisis de calidad/seguridad con puerta de calidad |
+## 2. Instalar Jenkins (reproducible)
 
-OWASP ZAP, Trivy, Gitleaks y Semgrep se ejecutan como **contenedores** (no como plugins): son las formas oficialmente soportadas, no dependen de la versión de Jenkins y se actualizan solas con la imagen.
+Desde AWS CloudShell, en la carpeta del repositorio y con la carpeta `.despliegue/` del despliegue (o su respaldo descomprimido):
 
-## 4. Dónde entra MITRE
+```bash
+./scripts/jenkins.sh up <su-ip-pública>     # la ve en https://checkip.amazonaws.com ; sólo esa IP abre el puerto 8080
+./scripts/jenkins.sh clave                  # contraseña del usuario admin
+./scripts/jenkins.sh url                    # http://<ip>:8080/
+```
 
-No existe un "plugin de MITRE" para Jenkins. MITRE aporta **catálogos** que las herramientas ya usan, y el pipeline los aprovecha en tres niveles:
+Qué crea ([`infra/jenkins.yaml`](../infra/jenkins.yaml)): una EC2 `t3.medium` (40 GB cifrados, IMDSv2) con Docker; Jenkins corre en
+un contenedor construido desde [`jenkins/Dockerfile`](../jenkins/Dockerfile) con los plugins de [`jenkins/plugins.txt`](../jenkins/plugins.txt)
+y **toda la configuración como código** en [`jenkins/casc.yaml`](../jenkins/casc.yaml): usuario `admin` (sin registro, sin acceso
+anónimo, CSRF activo), la credencial `pnk-despliegue` y el trabajo `cartapnk`. No hay asistente de instalación ni clics manuales.
 
-1. **CVE** (MITRE): Dependency-Check y Trivy reportan vulnerabilidades por identificador CVE.
-2. **CWE** (MITRE): tipo de debilidad. Dependency-Check lista los `cwes` de cada vulnerabilidad, ZAP incluye `cweid` en cada alerta y las reglas de Semgrep llevan etiquetas `CWE-xxx`.
-3. **CAPEC y ATT&CK** (MITRE): patrón de ataque y técnica del adversario. `backend/tools/mapear-mitre.js` consolida los reportes y, con la tabla [`backend/tools/mitre-mapping.json`](../backend/tools/mitre-mapping.json), genera `reportes/mitre.md`:
-   *hallazgo → CWE → CAPEC → técnica ATT&CK* (por ejemplo CWE-89 → CAPEC-66 → T1190; CWE-307 → CAPEC-49 → T1110).
-   La tabla es una propuesta de trabajo: valide cada fila en cwe.mitre.org / capec.mitre.org / attack.mitre.org antes de citarla.
+Secretos: la contraseña de admin y `.despliegue/` empaquetado se guardan **cifrados en SSM Parameter Store** (`/cartapnk/jenkins/*`);
+la instancia los lee al arrancar y los monta sólo para el contenedor. No aparecen en el repositorio, en el user-data ni en los logs.
+Para AWS no hay llaves: Jenkins usa el rol de la instancia (`LabInstanceProfile`).
 
-Extensión opcional (si el profesor quiere algo más "MITRE"): ejecutar **MITRE Caldera** (emulación de adversarios, imagen Docker) contra el ambiente **QA**, nunca contra producción, con un perfil que reproduzca las técnicas del mapeo (T1190, T1110, T1539), y revisar la cobertura en **ATT&CK Navigator**.
+Destruir: `./scripts/jenkins.sh down` (no toca la pila de la aplicación).
 
-## 5. Plan de trabajo sugerido
+## 3. Demostración pedida: una versión bloqueada y la corregida publicada
 
-| Semana | Entregable |
-|---|---|
-| 1 | Jenkins en EC2 + plugins + credenciales; pipeline `Checkout → lint → pruebas QA` en verde |
-| 2 | Etapas de seguridad estática: Gitleaks, Semgrep, `npm audit`, Dependency-Check |
-| 3 | Imagen + Trivy, despliegue a QA y ZAP baseline; informe MITRE |
-| 4 | Aprobación y despliegue a producción por SSH, webhooks, informe de la entrega (capturas del pipeline, ejemplo de build roto por una vulnerabilidad y corregido) |
+1. Commit A en `develop` que **incumple un control** (p. ej. quitar la comprobación de propietario en un controlador del panel).
+   Jenkins lo detecta en la etapa **Lint y pruebas**: `tests/asvs.test.js` (ficha V8) falla → ejecución en rojo, **no se publica**.
+2. Commit B que lo corrige. Todas las etapas en verde → **Publicar en AWS** → `https://cartapnk.xyz/api/version` muestra el commit B.
 
-Para la demostración conviene **provocar un fallo a propósito** (por ejemplo, volver a introducir una concatenación SQL o quitar `httpOnly`) y mostrar cómo Semgrep/ESLint/ZAP/las pruebas detienen el pipeline.
+Evidencia para el informe: la vista de etapas de ambas ejecuciones (nombre `#N · <commit>`), el log de la etapa que falló, los
+artefactos `reportes/` y la respuesta de `/api/version`.
 
-## 6. Riesgos y notas
+## 4. Endurecimiento de Jenkins
 
-- **AWS Academy** reinicia las instancias y cambia la IP: use Elastic IP o Cloudflare Tunnel también para Jenkins, y guarde `jenkins_home` en un volumen.
-- El escaneo de Dependency-Check descarga la base de vulnerabilidades (varios minutos la primera vez): cachee su directorio de datos entre ejecuciones y use una clave de la API de NVD para evitar límites de tasa.
-- ZAP *baseline* es **pasivo**; un escaneo activo (`zap-full-scan.py`) sólo debe apuntar a QA y puede tardar bastante: déjelo para una ejecución programada nocturna.
-- El almacenamiento de intentos de login (`express-rate-limit`) es en memoria: con varias réplicas hay que moverlo a Redis.
-
-## 7. Referencias
-
-- Plugin OWASP Dependency-Check para pipelines: <https://jenkins.io/doc/pipeline/steps/dependency-check-jenkins-plugin/>
-- ZAP en CI/CD (baseline scan): <https://zaproxy.org/blog/2020-04-09-automate-security-testing-with-zap-and-github-actions>
-- Cloudflare Tunnel gestionado de forma remota: <https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/configure-tunnels/remote-management/>
+- Interfaz sólo desde la IP autorizada (Security Group), sin registro de usuarios ni lectura anónima, protección CSRF.
+- Sin ejecutores en el nodo principal para otra cosa que este pipeline (1 ejecutor, modo exclusivo).
+- Credenciales sólo en el almacén de Jenkins (tipo archivo, enmascaradas en los logs); `.despliegue` se borra del workspace al terminar.
+- Herramientas de escaneo con versión fija (contenedores efímeros); el socket de Docker sólo lo usa el pipeline.

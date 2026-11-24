@@ -1,9 +1,10 @@
-// BORRADOR para la 4.ª entrega — pipeline CI/CD con controles de seguridad (DevSecOps).
-// No se ha ejecutado contra un Jenkins real: los nombres de plugins/parámetros marcados con (*) deben validarse con el
-// "Pipeline Syntax / Snippet Generator" de su instalación. Ver docs/JENKINS.md.
+// Pipeline CI/CD de CartaPnk con controles de seguridad (4.ª entrega).
+// Cada etapa llama a jenkins/controles.sh (los mismos comandos se pueden correr a mano: ver docs/JENKINS.md).
+// Cualquier control que falle DETIENE el pipeline: la versión no se publica. Si todo pasa, se publica en AWS con
+// scripts/desplegar.sh, que verifica el servicio y, si la verificación falla, vuelve sola a la versión anterior.
 //
-// Requisitos del agente: Docker (con Compose v2) y acceso al socket de Docker. No necesita Node instalado.
-// Credenciales esperadas en Jenkins:  ec2-prod-ssh (SSH), prod-host (texto: usuario@host), prod-url (texto: https://menu.<dominio>)
+// Requisitos (los deja listos infra/jenkins.yaml): Docker con Compose, AWS CLI con el rol de la instancia y la credencial
+// de tipo archivo "pnk-despliegue" (carpeta .despliegue empaquetada).
 
 pipeline {
   agent any
@@ -11,140 +12,51 @@ pipeline {
   options {
     timestamps()
     disableConcurrentBuilds()
-    buildDiscarder(logRotator(numToKeepStr: '20'))
-    timeout(time: 60, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '30'))
+    timeout(time: 90, unit: 'MINUTES')
   }
 
   environment {
-    NODE_IMG   = 'node:24-alpine'
-    PROY_QA    = "pnk-qa-ci-${env.BUILD_NUMBER}"
-    IMAGEN     = "pnk-security:${env.BUILD_NUMBER}"
-    COMPOSE_QA = "docker compose -p pnk-qa-ci-${env.BUILD_NUMBER} --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml"
+    PROYECTO = "pnk-ci-${env.BUILD_NUMBER}"   // contenedores de QA propios de esta ejecución
+    REPORTES = "${env.WORKSPACE}/reportes"
   }
 
   stages {
-
-    stage('Checkout') {
+    stage('Versión') {
       steps {
-        checkout scm
-        sh 'mkdir -p reportes'
-      }
-    }
-
-    stage('Preparar ambiente QA') {
-      steps {
-        // genera env/qa.env con secretos aleatorios (no se versiona)
-        sh 'docker run --rm -v "$PWD":/app -w /app $NODE_IMG node tools/init-env.js qa'
-      }
-    }
-
-    // ---------------------------------------------------------------- SEGURIDAD ESTÁTICA (antes de ejecutar nada)
-    stage('Secretos (Gitleaks)') {
-      steps {
-        sh '''docker run --rm -v "$PWD":/repo zricethezav/gitleaks:latest detect --source /repo --no-banner \
-              --report-format sarif --report-path /repo/reportes/gitleaks.sarif --exit-code 1'''
-      }
-    }
-
-    stage('SAST (Semgrep: OWASP Top 10 + Node.js)') {
-      steps {
-        sh '''docker run --rm -v "$PWD":/src semgrep/semgrep semgrep scan --config p/owasp-top-ten --config p/nodejs \
-              --sarif --output /src/reportes/semgrep.sarif --error /src'''
-      }
-    }
-
-    stage('Dependencias (SCA)') {
-      parallel {
-        stage('npm audit') {
-          steps {
-            sh 'docker run --rm -v "$PWD":/app -w /app/backend $NODE_IMG sh -c "npm ci --omit=dev && npm audit --omit=dev --audit-level=high"'
-          }
+        script {
+          env.VERSION = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+          currentBuild.displayName = "#${env.BUILD_NUMBER} · ${env.VERSION}"
+          currentBuild.description = sh(script: 'git log -1 --pretty=%s', returnStdout: true).trim()
         }
-        stage('OWASP Dependency-Check') {
-          steps {
-            // (*) requiere la herramienta "dependency-check" configurada en Manage Jenkins > Tools
-            dependencyCheck additionalArguments: '--scan backend/package-lock.json --format JSON --format XML --format HTML --out reportes/dependency-check --failOnCVSS 9',
-                            odcInstallation: 'dependency-check'
-            // (*) umbrales: el nombre exacto de los parámetros se valida en el generador de snippets
-            dependencyCheckPublisher pattern: 'reportes/dependency-check/dependency-check-report.xml',
-                                     failedTotalCritical: 1, unstableTotalHigh: 1
-          }
-        }
+        sh 'rm -rf reportes .despliegue && ./jenkins/controles.sh preparar'
       }
     }
 
-    // ---------------------------------------------------------------- QA: lint + pruebas automáticas
-    stage('Lint + pruebas (QA)') {
-      steps {
-        sh '$COMPOSE_QA up --build --abort-on-container-exit --exit-code-from pruebas'
-      }
-      post {
-        always { sh '$COMPOSE_QA down -v || true' }
-      }
+    stage('Secretos (Gitleaks)')        { steps { sh './jenkins/controles.sh secretos' } }
+    stage('SAST (Semgrep)')             { steps { sh './jenkins/controles.sh sast' } }
+    stage('Dependencias (npm audit)')   { steps { sh './jenkins/controles.sh dependencias' } }
+
+    stage('Lint y pruebas (QA)') {
+      steps { sh './jenkins/controles.sh pruebas' }
+      post { always { sh './jenkins/controles.sh limpiar' } }
     }
 
-    // ---------------------------------------------------------------- IMAGEN
-    stage('Construir imagen') {
-      steps {
-        sh 'docker build --target produccion -t $IMAGEN .'
-      }
+    stage('Imágenes')                   { steps { sh './jenkins/controles.sh imagenes' } }
+    stage('Imágenes: CVE (Trivy)')      { steps { sh './jenkins/controles.sh trivy' } }
+
+    stage('DAST (OWASP ZAP)') {
+      steps { sh './jenkins/controles.sh dast' }
+      post { always { sh './jenkins/controles.sh limpiar' } }
     }
 
-    stage('Escaneo de la imagen (Trivy)') {
+    stage('Publicar en AWS (pruebas)') {
       steps {
-        sh '''docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/reportes":/reportes aquasec/trivy:latest image \
-              --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --format sarif --output /reportes/trivy.sarif $IMAGEN'''
-      }
-    }
-
-    // ---------------------------------------------------------------- DAST sobre QA
-    stage('Desplegar QA y DAST (OWASP ZAP)') {
-      steps {
-        sh '$COMPOSE_QA up -d --build back front db'
-        sh '''
-          # esperar a que la app responda dentro de la red de Docker del proyecto
-          for i in $(seq 1 30); do
-            docker run --rm --network ${PROY_QA}_default curlimages/curl -fsS http://front:8080/salud && break || sleep 3
-          done
-          # escaneo pasivo (baseline); las reglas con FAIL en jenkins/zap-reglas.tsv rompen el build
-          docker run --rm --network ${PROY_QA}_default -v "$PWD/reportes":/zap/wrk:rw -v "$PWD/jenkins":/zap/config:ro \
-            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://front:8080/restaurantes/1 \
-            -c /zap/config/zap-reglas.tsv -r zap-baseline.html -J zap-baseline.json
-        '''
-      }
-      post {
-        always { sh '$COMPOSE_QA down -v || true' }
-      }
-    }
-
-    // ---------------------------------------------------------------- MITRE: consolidar CWE -> CAPEC -> ATT&CK
-    stage('Informe MITRE (CWE / CAPEC / ATT&CK)') {
-      steps {
-        sh 'docker run --rm -v "$PWD":/app -w /app $NODE_IMG node backend/tools/mapear-mitre.js reportes reportes/mitre.md'
-      }
-    }
-
-    // ---------------------------------------------------------------- PRODUCCIÓN (sólo rama main, con aprobación)
-    stage('Aprobación a producción') {
-      when { branch 'main' }
-      steps {
-        timeout(time: 30, unit: 'MINUTES') {
-          input message: '¿Desplegar a PRODUCCIÓN?', ok: 'Desplegar'
-        }
-      }
-    }
-
-    stage('Desplegar a producción (EC2)') {
-      when { branch 'main' }
-      steps {
-        withCredentials([string(credentialsId: 'prod-host', variable: 'PROD_HOST'), string(credentialsId: 'prod-url', variable: 'PROD_URL')]) {
-          sshagent(credentials: ['ec2-prod-ssh']) {
-            sh '''ssh -o StrictHostKeyChecking=accept-new "$PROD_HOST" \
-                  "cd ~/pnkSecurity-node && git fetch origin main && git reset --hard origin/main && \
-                   docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f docker-compose.prod.yml up -d --build"'''
-          }
-          // prueba de humo a través de Cloudflare
-          sh 'for i in $(seq 1 20); do curl -fsS "$PROD_URL/salud" && exit 0 || sleep 5; done; exit 1'
+        withCredentials([file(credentialsId: 'pnk-despliegue', variable: 'DESPLIEGUE')]) {
+          sh '''
+            tar -xzf "$DESPLIEGUE"
+            PNK_REVERTIR_SI_FALLA=1 PNK_DB_MULTIAZ="${PNK_DB_MULTIAZ:-false}" ./scripts/desplegar.sh publicar pruebas "$VERSION"
+          '''
         }
       }
     }
@@ -153,12 +65,10 @@ pipeline {
   post {
     always {
       archiveArtifacts artifacts: 'reportes/**', allowEmptyArchive: true
-      // (*) plugin HTML Publisher
-      publishHTML(target: [reportDir: 'reportes', reportFiles: 'zap-baseline.html', reportName: 'OWASP ZAP', allowMissing: true, keepAll: true, alwaysLinkToLastBuild: true])
-      publishHTML(target: [reportDir: 'reportes/dependency-check', reportFiles: 'dependency-check-report.html', reportName: 'Dependency-Check', allowMissing: true, keepAll: true, alwaysLinkToLastBuild: true])
-      // (*) plugin Warnings Next Generation: importa los informes SARIF de Semgrep, Gitleaks y Trivy
-      recordIssues(tools: [sarif(id: 'semgrep', pattern: 'reportes/semgrep.sarif'), sarif(id: 'gitleaks', pattern: 'reportes/gitleaks.sarif'), sarif(id: 'trivy', pattern: 'reportes/trivy.sarif')])
+      sh 'rm -rf .despliegue'                      // los secretos no quedan en el espacio de trabajo
+      sh 'docker image prune -f >/dev/null || true'
     }
-    failure { echo 'El pipeline falló: revise el informe de seguridad de la etapa marcada en rojo.' }
+    success { echo "Versión ${env.VERSION}: pasó todos los controles y quedó publicada." }
+    failure { echo "Versión ${env.VERSION}: BLOQUEADA. Revise la etapa en rojo y los informes en 'Artefactos' (reportes/)." }
   }
 }
