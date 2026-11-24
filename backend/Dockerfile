@@ -65,7 +65,9 @@ RUN mkdir -p db/certs \
  && wget -qO db/certs/rds-global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
  && test -s db/certs/rds-global-bundle.pem
 # /app/uploads: imágenes subidas desde el panel con STORAGE_DRIVER=local (en AWS se usa S3 y no se escribe a disco)
-RUN mkdir -p uploads && chmod +x docker/entrypoint.sh && chown -R node:node /app
+# La imagen de producción no necesita npm (arranca con node): se elimina junto con sus dependencias internas, que Trivy
+# reportaba con CVE (undici, brace-expansion) y que sólo agrandaban la superficie de ataque.
+RUN mkdir -p uploads && chmod +x docker/entrypoint.sh && chown -R node:node /app \n && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
