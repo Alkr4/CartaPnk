@@ -17,6 +17,5 @@ services:
   front:
     ports:
       - "${APP_PORT:-3000}:8080" # cambie APP_PORT en env/dev.env si 3000 está ocupado (p. ej. por producción en el mismo servidor)
-    volumes:
-      # los archivos del sitio se montan: al guardar un HTML/CSS/JS basta recargar el navegador
-      - ./frontend/public:/usr/share/nginx/html:ro
+    # el frontend React se compila dentro de la imagen; para recarga en caliente use "cd frontend && npm run dev"
+    # (Vite en http://localhost:5173, reenvía /api y /media a PNK_API, por defecto http://localhost:3100 = la API de este ambiente)

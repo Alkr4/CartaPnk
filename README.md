@@ -1,14 +1,14 @@
 # CartaPnk — frontend + backend (Node.js · Express · PostgreSQL)
 
 Menú digital para restaurantes (laboratorio de Programación Segura). Es la reescritura de la aplicación PHP/MySQL
-(`VulnerablePage`) con **frontend y backend separados**: un **sitio web estático** (HTML, CSS y JavaScript sin frameworks,
+(`VulnerablePage`) con **frontend y backend separados**: un **frontend en React** (compilado con Vite a archivos estáticos,
 servido por **Nginx**) que consume una **API REST en Node.js + Express + PostgreSQL** con **arquitectura MVC**, **Docker** y
 **tres ambientes** (desarrollo, QA y producción). **La apariencia es la misma** que la del sitio original: se reutilizan el CSS
 y las imágenes.
 
 ```
  Navegador ──► Nginx (frontend, :8080) ──┬── /   /restaurantes/:id   /carrito   /admin         → páginas estáticas
-                                         ├── /css /js /img /imagenes /vendors                   → archivos estáticos
+                                         ├── /assets (React compilado) /css /img /imagenes /vendors → archivos estáticos
                                          └── /api/*   /media/*   /salud ──► Express (backend, :3000) ──► PostgreSQL
                                                                                       └──────────────► Amazon S3 (imágenes)
 ```
@@ -18,12 +18,12 @@ La API **no publica puertos**: sólo Nginx puede alcanzarla, por la red interna 
 
 | Capa | Tecnología |
 |---|---|
-| Frontend | HTML + CSS + **JavaScript puro** (sin React ni frameworks) · Bootstrap 5, jQuery y Owl Carousel (los del sitio original) · **Nginx** (imagen `nginx-unprivileged`) |
+| Frontend | **React 19** + **Vite** · CSS de Bootstrap 5 (el del sitio original; sin jQuery) · **Nginx** (imagen `nginx-unprivileged`) |
 | Backend | Node.js 24 LTS · Express 5 · API JSON (`/api`) |
 | Base de datos | PostgreSQL 17 (`pg`, consultas parametrizadas) |
 | Sesión | `express-session` guardada en PostgreSQL (`connect-pg-simple`) |
 | Seguridad | `helmet` · CSP en Nginx y en la API · CSRF propio · `bcryptjs` · `express-rate-limit` · roles |
-| Calidad | Backend: Jest + Supertest (136 pruebas) · ESLint + `eslint-plugin-security` · Frontend: `node:test` + jsdom (16 pruebas) |
+| Calidad | Backend: Jest + Supertest (136 pruebas) · ESLint + `eslint-plugin-security` · Frontend: Vitest + Testing Library + jsdom (20 pruebas) · ESLint con reglas anti-XSS y `react-hooks` |
 | Contenedores | Docker multi-etapa · Docker Compose (dev / QA / prod) |
 
 ## Estructura del repositorio
@@ -55,16 +55,19 @@ Petición /api ─► routes/ ─► middlewares/ ─► controllers/ ─► mod
 | `db/` | Migraciones SQL, datos iniciales y sus ejecutores (`migrate.js`, `seed.js`). |
 | `tests/` | Pruebas automáticas de la API. |
 
-### Frontend — sitio estático
+### Frontend — React
 
-| Archivo (`frontend/public/`) | Pantalla |
+| Archivo (`frontend/`) | Pantalla |
 |---|---|
-| `carta.html` + `js/carta.js` | Carta digital (`/` y `/restaurantes/:id`) |
-| `carrito.html` + `js/carrito.js` | Productos seleccionados (`/carrito`) |
-| `admin.html` + `js/admin.js` | Panel de administración (`/admin`, pantallas con `#/…`) |
-| `js/comun.js` | Cliente de la API (CSRF), DOM seguro (`h()`), formato de moneda, iconos |
+| `carta.html` + `src/carta.jsx` | Carta digital (`/` y `/restaurantes/:id`) |
+| `carrito.html` + `src/carrito.jsx` | Productos seleccionados (`/carrito`) |
+| `admin.html` + `src/admin.jsx` | Panel de administración (`/admin`, pantallas con `#/…`; `#/cuentas` sólo superadmin) |
+| `src/comun.jsx` | Cliente de la API (CSRF), formato de moneda, validación de URL de imágenes, iconos, pie y pantalla de error |
+| `public/` | CSS, imágenes y Bootstrap (se copian tal cual a `dist/`) |
 
-Todo dato que llega de la API se inserta como **nodo de texto** (nunca como HTML): un nombre o comentario con `<script>` se ve tal cual y no se ejecuta.
+`npm run build` (Vite) deja el sitio compilado en `dist/`; la imagen Docker lo hace en una etapa con Node y entrega sólo `dist/` a Nginx.
+React escapa todo dato que llega de la API: un nombre o comentario con `<script>` se ve tal cual y no se ejecuta.
+`dangerouslySetInnerHTML`, `innerHTML` y `document.write` están prohibidos por ESLint y por una prueba automática.
 
 ### API REST
 
@@ -119,7 +122,8 @@ npm run migrate && SEED_CATALOGO=true SEED_USUARIOS_DEMO=true npm run seed
 npm test && npm run lint          # pruebas de la API (requieren la base)
 npm run dev                       # API en http://localhost:3000  (sin frontend: pruebe con curl)
 
-cd ../frontend && npm install && npm test     # pruebas del frontend (jsdom, no necesitan base de datos)
+cd ../frontend && npm install && npm test && npm run lint   # pruebas del frontend (jsdom, no necesitan base de datos)
+npm run dev                                   # Vite en http://localhost:5173 (reenvía /api a PNK_API, por defecto :3100)
 ```
 
 El sitio completo (frontend + API) se levanta con Docker Compose, porque Nginx hace de punto de entrada único.
@@ -139,7 +143,7 @@ El informe de pentesting original (VUL-01 a VUL-22) deja de aplicar por diseño:
 | Fuerza bruta (VUL-16) | 5 intentos fallidos por IP + correo en 15 min; respuesta genérica |
 | Contraseñas en texto plano (VUL-17) | **bcrypt (12 rondas)**; la columna es `password_hash`; comparación en tiempo constante |
 | Credenciales de BD (VUL-19) | Sólo por variables de entorno; usuario/clave distintos por ambiente |
-| Archivos expuestos (VUL-01) | Nginx sólo sirve `frontend/public/`; el código y el SQL viven en otro contenedor sin puertos |
+| Archivos expuestos (VUL-01) | Nginx sólo sirve el sitio compilado (`frontend/dist/`); el código y el SQL viven en otro contenedor sin puertos |
 | Dependencias (VUL-18) | Dependencias actuales + `npm audit` + `eslint-plugin-security` en cada ejecución de QA |
 | Acceso a datos (VUL-21) | Capa única de modelos con consultas parametrizadas |
 | Rutas de imágenes (VUL-22) | El id de la ruta es siempre un entero validado |
