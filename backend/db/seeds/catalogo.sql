@@ -13,13 +13,13 @@ INSERT INTO direcciones (id, calle, numero, comuna, region, creado, actualizado,
 SELECT setval(pg_get_serial_sequence('direcciones', 'id'), (SELECT max(id) FROM direcciones));
 
 INSERT INTO restaurantes (id, rut, nombre, fono, mapa, foto, email, creado, actualizado, eliminado, direccion_id) OVERRIDING SYSTEM VALUE VALUES
-  (1, '99887766-5', 'Afríca Restobar', '22334455', NULL, 'resto1.jpg', 'mail@correo.cl', '2020-09-22 22:59:26', '2020-10-04 12:14:35', NULL, 2),
-  (2, '88776655-4', 'Restaurant la Bahía', '512323232', NULL, 'resto2.png', 'mail1@correo.cl', '2020-09-24 15:07:32', '2020-09-28 01:59:00', NULL, 3),
-  (3, '22334455-6', 'La Esquina del Sabor', '22334455', NULL, 'logo_empresa_comodin.png', 'mail2@correo.cl', '2020-09-27 14:10:20', '2020-09-28 01:58:16', NULL, 4),
-  (4, '258-3', 'La Pica de Armando', '223366', NULL, 'logo_empresa_comodin.png', 'mail3@correo.cl', '2020-09-28 15:31:09', NULL, NULL, 5),
-  (5, '258-9', 'Donde Carlos', '336699', NULL, 'logo_empresa_comodin.png', 'mail4@correo.cl', '2020-09-29 10:35:12', NULL, NULL, 6),
-  (6, '258-6', 'RestoPenka', '336699', NULL, 'logo_empresa_comodin.png', 'mail5@correo.cl', '2020-09-30 17:38:12', NULL, NULL, 7),
-  (7, '369-5', 'La Pica de Carolina', '336699', NULL, 'logo_empresa_comodin.png', 'mail6@correo.cl', '2020-10-05 04:59:40', '2020-10-05 05:14:08', NULL, 8);
+  (1, '99887766-0', 'Afríca Restobar', '22334455', NULL, 'resto1.jpg', 'mail@correo.cl', '2020-09-22 22:59:26', '2020-10-04 12:14:35', NULL, 2),
+  (2, '88776655-K', 'Restaurant la Bahía', '512323232', NULL, 'resto2.png', 'mail1@correo.cl', '2020-09-24 15:07:32', '2020-09-28 01:59:00', NULL, 3),
+  (3, '22334455-0', 'La Esquina del Sabor', '22334455', NULL, 'logo_empresa_comodin.png', 'mail2@correo.cl', '2020-09-27 14:10:20', '2020-09-28 01:58:16', NULL, 4),
+  (4, '258-5', 'La Pica de Armando', '223366', NULL, 'logo_empresa_comodin.png', 'mail3@correo.cl', '2020-09-28 15:31:09', NULL, NULL, 5),
+  (5, '12345678-5', 'Donde Carlos', '336699', NULL, 'logo_empresa_comodin.png', 'mail4@correo.cl', '2020-09-29 10:35:12', NULL, NULL, 6),
+  (6, '11111111-1', 'RestoPenka', '336699', NULL, 'logo_empresa_comodin.png', 'mail5@correo.cl', '2020-09-30 17:38:12', NULL, NULL, 7),
+  (7, '369-7', 'La Pica de Carolina', '336699', NULL, 'logo_empresa_comodin.png', 'mail6@correo.cl', '2020-10-05 04:59:40', '2020-10-05 05:14:08', NULL, 8);
 SELECT setval(pg_get_serial_sequence('restaurantes', 'id'), (SELECT max(id) FROM restaurantes));
 
 INSERT INTO cartas (id, nombre, orden, visible, foto, creada, actualizada, eliminada, restaurante_id) OVERRIDING SYSTEM VALUE VALUES

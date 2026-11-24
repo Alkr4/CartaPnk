@@ -57,6 +57,20 @@ export function moneda(n) {
   return '$ ' + new Intl.NumberFormat('es-CL').format(v);
 }
 
+/** RUT chileno con dígito verificador correcto (módulo 11). La API hace la misma comprobación; aquí sólo es para avisar antes. */
+export function rutValido(rut) {
+  const m = /^(\d{1,8})-([\dK])$/.exec(String(rut).replace(/\./g, '').toUpperCase());
+  if (!m) return false;
+  let suma = 0;
+  let factor = 2;
+  for (const d of m[1].split('').reverse()) {
+    suma += Number(d) * factor;
+    factor = factor === 7 ? 2 : factor + 1;
+  }
+  const resto = 11 - (suma % 11);
+  return m[2] === (resto === 11 ? '0' : resto === 10 ? 'K' : String(resto));
+}
+
 /** Título de la pestaña del navegador. */
 export function useTitulo(titulo) {
   useEffect(() => { if (titulo) document.title = titulo; }, [titulo]);
@@ -84,6 +98,34 @@ export function Icono({ nombre }) {
     <svg width={i.tam} height={i.tam} viewBox="0 0 16 16" className={'bi ' + (i.clase || '')} fill="currentColor" aria-hidden="true">
       {i.d.map((d) => <path key={d} fillRule="evenodd" d={d} />)}
     </svg>
+  );
+}
+
+/**
+ * Ventana de diálogo dentro de la página (clases de Bootstrap, controlada por React): reemplaza a alert()/confirm() del
+ * navegador. Se cierra con Escape, con la X o haciendo clic fuera. `pie` son los botones de acción (opcional).
+ */
+export function Dialogo({ titulo, children, pie, alCerrar }) {
+  useEffect(() => {
+    const tecla = (e) => { if (e.key === 'Escape') alCerrar(); };
+    document.addEventListener('keydown', tecla);
+    return () => document.removeEventListener('keydown', tecla);
+  }, [alCerrar]);
+  return (
+    <>
+      <div className="modal fade show d-block" tabIndex="-1" role="dialog" aria-modal="true" aria-labelledby="dialogo-titulo"
+        onClick={(e) => { if (e.target === e.currentTarget) alCerrar(); }}>
+        <div className="modal-dialog modal-dialog-centered" role="document"><div className="modal-content">
+          <div className="modal-header">
+            <h5 className="modal-title" id="dialogo-titulo">{titulo}</h5>
+            <button type="button" className="btn-close" aria-label="Cerrar" onClick={alCerrar} autoFocus={!pie} />
+          </div>
+          <div className="modal-body">{children}</div>
+          {pie && <div className="modal-footer">{pie}</div>}
+        </div></div>
+      </div>
+      <div className="modal-backdrop fade show" />
+    </>
   );
 }
 

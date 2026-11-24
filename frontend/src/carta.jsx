@@ -1,6 +1,6 @@
 // Carta digital: pide los datos a la API (GET /api/restaurantes/:id) y dibuja la página con React.
 import { useEffect, useState } from 'react';
-import { api, cargarSesion, Icono, montar, moneda, Multilinea, PantallaError, Pie, rutaInterna, useTitulo } from './comun.jsx';
+import { api, cargarSesion, Dialogo, Icono, montar, moneda, Multilinea, PantallaError, Pie, rutaInterna, useTitulo } from './comun.jsx';
 
 /** Datos de la página: { vacio } si aún no hay restaurantes, { d, sesion } o { error }. */
 async function cargar() {
@@ -178,26 +178,7 @@ function Comentarios({ lista, formulario }) {
 
 /** Aviso tras seleccionar un producto (modal con las clases de Bootstrap, controlado por React). */
 function Aviso({ mensaje, alCerrar }) {
-  useEffect(() => {
-    const tecla = (e) => { if (e.key === 'Escape') alCerrar(); };
-    document.addEventListener('keydown', tecla);
-    return () => document.removeEventListener('keydown', tecla);
-  }, [alCerrar]);
-  return (
-    <>
-      <div className="modal fade show d-block" tabIndex="-1" role="dialog" aria-modal="true" aria-labelledby="aviso-titulo"
-        onClick={(e) => { if (e.target === e.currentTarget) alCerrar(); }}>
-        <div className="modal-dialog" role="document"><div className="modal-content">
-          <div className="modal-header">
-            <h5 className="modal-title text-lg-center" id="aviso-titulo">Selección de Producto</h5>
-            <button type="button" className="btn-close" aria-label="Cerrar" onClick={alCerrar} autoFocus />
-          </div>
-          <div className="modal-body">{mensaje}</div>
-        </div></div>
-      </div>
-      <div className="modal-backdrop fade show" />
-    </>
-  );
+  return <Dialogo titulo="Selección de Producto" alCerrar={alCerrar}>{mensaje}</Dialogo>;
 }
 
 function FilaAdmin({ sesion }) {

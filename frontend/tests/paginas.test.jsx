@@ -257,25 +257,92 @@ test('panel: login correcto muestra el listado; el texto de la API va escapado',
   expect(screen.queryByText('Cuentas')).toBeNull(); // un dueño no ve la gestión de cuentas
 });
 
-test('panel: el formulario envía multipart con el token CSRF y muestra los errores 422 por campo', async () => {
+/** Llena el formulario de restaurante con datos válidos (el navegador deja enviarlo). */
+function llenarRestaurante(cambios = {}) {
+  const datos = { nombre: 'Mi Resto', rut: '76.123.456-0', fono: '+56 9 1234 5678', calle: 'Calle', numero: 'S/N', comuna: 'La Serena', ...cambios };
+  for (const [campo, valor] of Object.entries(datos)) {
+    const el = document.querySelector('#f-' + campo);
+    fireEvent.change(el, { target: { value: valor } });
+    fireEvent.input(el);
+  }
+}
+
+test('panel: el navegador no envía un formulario inválido (obligatorios, RUT, precio) y marca los campos', async () => {
+  irA('/admin#/restaurantes/nuevo');
+  const llamadas = simularApi((m, ruta) => (ruta === '/api/sesion' ? { cuerpo: sesionDe('admin') } : { estado: 404, cuerpo: {} }));
+  const { container } = render(<Admin />);
+  fireEvent.click(await screen.findByText('Guardar'));
+  expect(container.querySelector('form').className).toContain('was-validated'); // Bootstrap pinta rojo/verde
+  expect(container.querySelector('#f-nombre').validity.valueMissing).toBe(true);
+
+  llenarRestaurante({ rut: '76.123.456-7' }); // dígito verificador incorrecto
+  fireEvent.click(screen.getByText('Guardar'));
+  expect(container.querySelector('#f-rut').validationMessage).toBe('El dígito verificador no corresponde a este RUT');
+  await screen.findByText('El dígito verificador no corresponde a este RUT');
+  expect(llamadas.some((l) => l.metodo === 'POST')).toBe(false);
+  cleanup();
+
+  // precio: ni negativo ni exagerado
+  irA('/admin#/categorias/4/items/nuevo');
+  const llamadas2 = simularApi((m, ruta) => {
+    if (ruta === '/api/sesion') return { cuerpo: sesionDe('admin') };
+    return { cuerpo: { categoria: { id: 4, restaurante_id: 1 } } };
+  });
+  render(<Admin />);
+  const precio = await screen.findByLabelText('Precio ($)');
+  fireEvent.change(screen.getByLabelText(/^Nombre/), { target: { value: 'Plato' } });
+  for (const [valor, malo] of [['-500', true], ['1000001', true], ['0', true], ['5990', false]]) {
+    fireEvent.change(precio, { target: { value: valor } });
+    expect(precio.validity.valid).toBe(!malo);
+  }
+  expect(precio.min).toBe('1');
+  expect(precio.max).toBe('1000000');
+  expect(llamadas2.some((l) => l.metodo === 'POST')).toBe(false);
+});
+
+test('panel: datos válidos se envían como multipart con CSRF; los errores 422 de la API se muestran en su campo', async () => {
   irA('/admin#/restaurantes/nuevo');
   const llamadas = simularApi((m, ruta) => {
     if (ruta === '/api/sesion') return { cuerpo: sesionDe('admin') };
-    if (m === 'POST') return { estado: 422, cuerpo: { error: 'Hay datos que corregir', errores: { nombre: 'El nombre es obligatorio', rut: 'El RUT no es válido' } } };
+    if (m === 'POST') return { estado: 422, cuerpo: { error: 'Hay datos que corregir', errores: { nombre: 'Ese nombre ya existe' } } };
     return { estado: 404, cuerpo: {} };
   });
   const { container } = render(<Admin />);
-  fireEvent.click(await screen.findByText('Guardar'));
-  await screen.findByText('El nombre es obligatorio');
+  await screen.findByText('Guardar');
+  llenarRestaurante();
+  fireEvent.click(screen.getByText('Guardar'));
+  await screen.findByText('Ese nombre ya existe');
   const post = llamadas.find((l) => l.metodo === 'POST');
   expect(post.ruta).toBe('/api/admin/restaurantes');
   expect(post.cabeceras['X-CSRF-Token']).toBe('tk');
   expect(post.cuerpo).toBeInstanceOf(FormData);
-  expect(container.textContent).toContain('El RUT no es válido');
-  expect(container.querySelector('#f-nombre').className).toContain('is-invalid');
+  expect(post.cuerpo.get('rut')).toBe('76.123.456-0');
+  const nombre = container.querySelector('#f-nombre');
+  expect(nombre.validity.customError).toBe(true); // marcado en rojo
+  fireEvent.input(nombre); // al corregir, el error de la API se quita
+  expect(nombre.validity.valid).toBe(true);
 });
 
-test('panel: eliminar pide confirmación y usa DELETE con CSRF', async () => {
+test('panel: tras cerrar sesión, el siguiente login usa el token CSRF de la sesión nueva', async () => {
+  irA('/admin#/');
+  let token = 'viejo';
+  let conSesion = true;
+  const llamadas = simularApi((m, ruta) => {
+    if (ruta === '/api/sesion') return { cuerpo: { usuario: conSesion ? { nombre: 'S', rol: 'superadmin' } : null, csrfToken: token } };
+    if (ruta === '/api/admin/logout') { conSesion = false; token = 'nuevo'; return { cuerpo: { ok: true } }; }
+    if (ruta === '/api/admin/login') return { cuerpo: { usuario: { nombre: 'D', rol: 'admin' }, csrfToken: 'otro' } };
+    return { cuerpo: { restaurantes: [] } };
+  });
+  render(<Admin />);
+  fireEvent.click(await screen.findByText('Cerrar sesión'));
+  fireEvent.change(await screen.findByLabelText('Correo'), { target: { value: 'd@x.cl' } });
+  fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'clave-de-prueba' } });
+  fireEvent.click(screen.getByText('Ingresar'));
+  await waitFor(() => expect(llamadas.some((l) => l.ruta === '/api/admin/login')).toBe(true));
+  expect(llamadas.find((l) => l.ruta === '/api/admin/login').cabeceras['X-CSRF-Token']).toBe('nuevo');
+});
+
+test('panel: eliminar pide confirmación EN LA PÁGINA (sin confirm del navegador) y usa DELETE con CSRF', async () => {
   irA('/admin#/restaurantes/1');
   const detalle = { restaurante: { id: 1, nombre: 'R', rut: '1-9', fono: '1', email: '', calle: 'C', numero: '1', comuna: 'X', region: '', fotoUrl: null },
     cartas: [{ id: 3, nombre: 'Carta', visible: true, categorias: [] }], comentarios: [{ id: 8, usuario: 'Ana', comentario: 'hola' }] };
@@ -286,13 +353,19 @@ test('panel: eliminar pide confirmación y usa DELETE con CSRF', async () => {
   });
   render(<Admin />);
   await screen.findByText('hola');
-  const confirmar = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const confirmar = vi.spyOn(window, 'confirm');
   const botones = screen.getAllByText('Eliminar');
   fireEvent.click(botones[botones.length - 1]); // el del comentario
-  expect(confirmar).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('dialog').textContent).toContain('¿Eliminar el comentario?');
+  fireEvent.click(screen.getByText('Cancelar'));
+  expect(screen.queryByRole('dialog')).toBeNull();
   expect(llamadas.some((l) => l.metodo === 'DELETE')).toBe(false); // si el usuario cancela no se borra nada
-  confirmar.mockReturnValue(true);
   fireEvent.click(botones[botones.length - 1]);
+  fireEvent.keyDown(document, { key: 'Escape' }); // Escape también cancela
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(botones[botones.length - 1]);
+  fireEvent.click(screen.getByText('Sí, eliminar'));
+  expect(confirmar).not.toHaveBeenCalled();
   await waitFor(() => expect(llamadas.some((l) => l.metodo === 'DELETE')).toBe(true));
   const del = llamadas.find((l) => l.metodo === 'DELETE');
   expect(del.ruta).toBe('/api/admin/comentarios/8');

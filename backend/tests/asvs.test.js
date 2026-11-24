@@ -13,7 +13,7 @@ const Restaurante = require('../src/models/restaurante.model');
 
 const CLAVE = 'ClaveDePrueba-123';
 const RESTAURANTE = {
-  nombre: 'Local de Prueba', rut: '76123456-7', fono: '+56 9 1234 5678', email: 'local@prueba.cl',
+  nombre: 'Local de Prueba', rut: '76123456-0', fono: '+56 9 1234 5678', email: 'local@prueba.cl',
   calle: 'Av. Test', numero: '123', comuna: 'Santiago', region: 'Metropolitana',
 };
 const sufijo = Date.now();

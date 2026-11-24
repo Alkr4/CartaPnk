@@ -2,7 +2,7 @@
 // entregar admin.html. TODA la autorización se hace en la API (dueño sólo ve sus restaurantes; cuentas sólo superadmin):
 // esta pantalla únicamente muestra u oculta cosas.
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { api, cargarSesion, fijarCsrf, montar, moneda, Multilinea, PantallaError, rutaInterna } from './comun.jsx';
+import { api, cargarSesion, Dialogo, fijarCsrf, montar, moneda, Multilinea, PantallaError, rutaInterna, rutValido } from './comun.jsx';
 
 const ROLES_PANEL = ['admin', 'superadmin'];
 const Panel = createContext(null); // { usuario, irA(ruta, aviso), fallo(error) }
@@ -26,45 +26,107 @@ const conChecks = (o) => ({ ...o, visible: !!o.visible, destacado: !!o.destacado
 // ------------------------------------------------------------------ piezas de interfaz
 function Insignia({ texto, clase }) { return <span className={'badge badge-estado ' + clase}>{texto}</span>; }
 
+/** Botón "Eliminar" que pide confirmación en una ventana de la página (no con confirm() del navegador). */
 function BotonEliminar({ pregunta, ruta, volver }) {
   const { irA, fallo } = useContext(Panel);
+  const [abierto, setAbierto] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
+  const cerrar = useCallback(() => setAbierto(false), []);
   const eliminar = () => {
-    if (!window.confirm(pregunta)) return;
-    api('DELETE', ruta).then(() => irA(volver, { tipo: 'success', texto: 'Eliminado' })).catch(fallo);
+    setEliminando(true);
+    api('DELETE', ruta).then(() => irA(volver, { tipo: 'success', texto: 'Eliminado' }))
+      .catch((e) => { setEliminando(false); setAbierto(false); fallo(e); });
   };
-  return <button className="btn btn-sm btn-outline-danger" type="button" onClick={eliminar}>Eliminar</button>;
+  return (
+    <>
+      <button className="btn btn-sm btn-outline-danger" type="button" onClick={() => setAbierto(true)}>Eliminar</button>
+      {abierto && (
+        <Dialogo titulo="Confirmar eliminación" alCerrar={cerrar} pie={<>
+          <button type="button" className="btn btn-outline-secondary" onClick={cerrar} autoFocus>Cancelar</button>
+          <button type="button" className="btn btn-danger" onClick={eliminar} disabled={eliminando}>Sí, eliminar</button>
+        </>}>{pregunta}</Dialogo>
+      )}
+    </>
+  );
 }
 
 function Pantalla({ titulo, children }) {
   return <><h1 className="h3 mb-3">{titulo}</h1>{children}</>;
 }
 
+const MAX_IMAGEN = 2 * 1024 * 1024;
+
 /**
- * Formulario declarativo. campos: [{ nombre, etiqueta, tipo: text|number|email|password|textarea|check|foto, requerido, max, minimo, col }]
- * `enviar(FormData)` devuelve una promesa; si la API responde 422 con { errores } se marcan los campos (lo escrito se conserva).
+ * Un campo de texto/número con validación en el navegador: reglas HTML (required, min, max, pattern, maxlength), una
+ * comprobación propia opcional (`c.validar(valor)` -> mensaje) y el error que devuelva la API, todo vía setCustomValidity.
+ * Bootstrap pinta el borde rojo/verde (.was-validated) y el resplandor del foco; el mensaje va bajo el campo.
+ */
+function Campo({ c, valor, errorApi }) {
+  const id = 'f-' + c.nombre;
+  const ref = useRef(null);
+  const [mensaje, setMensaje] = useState('');
+  const revisar = useCallback((el, deLaApi) => {
+    const propio = !deLaApi && el.value && c.validar ? c.validar(el.value) : '';
+    el.setCustomValidity(deLaApi || propio || '');
+    setMensaje(el.validity.valid ? '' : (deLaApi || propio || c.ayuda || el.validationMessage));
+  }, [c]);
+  useEffect(() => { revisar(ref.current, errorApi); }, [errorApi, revisar]);
+
+  const comunes = {
+    ref, id, name: c.nombre, className: 'form-control', defaultValue: String(valor), required: c.requerido,
+    maxLength: c.max, minLength: c.minimo, min: c.min, max: c.tope, step: c.tipo === 'number' ? 1 : undefined,
+    pattern: c.patron, inputMode: c.tipo === 'number' ? 'numeric' : undefined,
+    'aria-describedby': id + '-ayuda ' + id + '-error', onInput: (e) => revisar(e.currentTarget),
+  };
+  return (
+    <div className={'mb-3 ' + (c.col || 'col-12')}>
+      <label className="form-label" htmlFor={id}>{c.etiqueta}{c.requerido && ' *'}</label>
+      {c.tipo === 'textarea' ? <textarea rows={3} {...comunes} />
+        : <input type={c.tipo || 'text'} autoComplete={c.tipo === 'password' ? 'new-password' : undefined} {...comunes} />}
+      <div className="invalid-feedback" id={id + '-error'}>{mensaje || 'Revisa este campo'}</div>
+      {c.ayuda && <div className="form-text" id={id + '-ayuda'}>{c.ayuda}</div>}
+    </div>
+  );
+}
+
+/**
+ * Formulario declarativo. campos: [{ nombre, etiqueta, tipo: text|number|email|password|textarea|check|foto, requerido,
+ * max (largo), minimo (largo), min / tope (valor numérico), patron (regex HTML), validar(valor) -> mensaje, ayuda, col }]
+ * Primero valida el navegador (no se envía nada inválido); la API vuelve a validar todo y, si responde 422 con { errores },
+ * esos mensajes se muestran en los mismos campos. `enviar(FormData)` devuelve una promesa.
  */
 function Formulario({ campos, valores = {}, fotoUrl, volver, enviar }) {
   const { fallo } = useContext(Panel);
   const [errores, setErrores] = useState(null);
+  const [validado, setValidado] = useState(false);
   const [enviando, setEnviando] = useState(false);
 
   const alEnviar = (e) => {
     e.preventDefault();
+    const form = e.currentTarget;
+    setValidado(true);
+    if (!form.checkValidity()) {
+      form.querySelector(':invalid')?.focus();
+      return;
+    }
     setEnviando(true);
-    enviar(new FormData(e.currentTarget)).catch((err) => {
+    enviar(new FormData(form)).catch((err) => {
       setEnviando(false);
       if (err.status === 422 && err.errores) setErrores(err.errores); else fallo(err);
     });
   };
+  const revisarImagen = (e) => {
+    const f = e.currentTarget.files[0];
+    e.currentTarget.setCustomValidity(f && f.size > MAX_IMAGEN ? 'La imagen supera los 2 MB' : '');
+  };
 
   return (
-    <form className="card card-body" noValidate onSubmit={alEnviar}>
+    <form className={'card card-body' + (validado ? ' was-validated' : '')} noValidate onSubmit={alEnviar}>
       {errores && <div className="alert alert-danger py-2" role="alert">Revisa los campos marcados.</div>}
       <div className="row">
         {campos.map((c) => {
           const id = 'f-' + c.nombre;
           const v = valores[c.nombre] ?? '';
-          const err = errores?.[c.nombre];
           if (c.tipo === 'check') {
             return (
               <div key={c.nombre} className="col-12 form-check form-switch mb-2 ms-2">
@@ -78,7 +140,8 @@ function Formulario({ campos, valores = {}, fotoUrl, volver, enviar }) {
               <div key={c.nombre} className="col-12 mb-3">
                 <label className="form-label" htmlFor={id}>Imagen (JPG, PNG o WEBP, máx. 2 MB)</label>
                 {fotoUrl && <div className="mb-2"><img className="thumb-lg" src={rutaInterna(fotoUrl, '')} alt="Imagen actual" /></div>}
-                <input className="form-control" type="file" id={id} name="foto" accept="image/jpeg,image/png,image/webp" />
+                <input className="form-control" type="file" id={id} name="foto" accept="image/jpeg,image/png,image/webp" onChange={revisarImagen} />
+                <div className="invalid-feedback">La imagen supera los 2 MB</div>
                 {fotoUrl && (
                   <div className="form-check mt-2">
                     <input className="form-check-input" type="checkbox" id="f-quitar" name="quitar_foto" />
@@ -88,18 +151,7 @@ function Formulario({ campos, valores = {}, fotoUrl, volver, enviar }) {
               </div>
             );
           }
-          const comunes = {
-            className: 'form-control' + (err ? ' is-invalid' : ''), id, name: c.nombre, defaultValue: String(v),
-            maxLength: c.max, minLength: c.minimo, required: c.requerido, 'aria-invalid': err ? true : undefined,
-          };
-          return (
-            <div key={c.nombre} className={'mb-3 ' + (c.col || 'col-12')}>
-              <label className="form-label" htmlFor={id}>{c.etiqueta}{c.requerido && ' *'}</label>
-              {c.tipo === 'textarea' ? <textarea rows={3} {...comunes} />
-                : <input type={c.tipo || 'text'} autoComplete={c.tipo === 'password' ? 'new-password' : undefined} {...comunes} />}
-              {err && <div className="invalid-feedback">{err}</div>}
-            </div>
-          );
+          return <Campo key={c.nombre} c={c} valor={v} errorApi={errores?.[c.nombre]} />;
         })}
       </div>
       <div className="mt-3">
@@ -112,28 +164,30 @@ function Formulario({ campos, valores = {}, fotoUrl, volver, enviar }) {
 
 const CAMPOS_RESTAURANTE = [
   { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, max: 200, col: 'col-md-8' },
-  { nombre: 'rut', etiqueta: 'RUT', requerido: true, max: 11, col: 'col-md-4' },
-  { nombre: 'fono', etiqueta: 'Teléfono', requerido: true, max: 45, col: 'col-md-6' },
+  { nombre: 'rut', etiqueta: 'RUT', requerido: true, max: 12, col: 'col-md-4', patron: '[0-9.]{1,10}-[0-9kK]',
+    validar: (v) => (rutValido(v) ? '' : 'El dígito verificador no corresponde a este RUT'), ayuda: 'Con guion y dígito verificador, p. ej. 76.123.456-0' },
+  { nombre: 'fono', etiqueta: 'Teléfono', requerido: true, max: 45, col: 'col-md-6', patron: String.raw`[0-9+\(\)\-\s]{3,45}`,
+    ayuda: 'Sólo números, espacios, +, ( ) y guion' },
   { nombre: 'email', etiqueta: 'Correo', tipo: 'email', max: 100, col: 'col-md-6' },
   { nombre: 'calle', etiqueta: 'Calle', requerido: true, max: 100, col: 'col-md-6' },
-  { nombre: 'numero', etiqueta: 'Número', requerido: true, max: 15, col: 'col-md-2' },
+  { nombre: 'numero', etiqueta: 'Número', requerido: true, max: 15, col: 'col-md-2', patron: String.raw`[0-9A-Za-z\/#\s\-]{1,15}`, ayuda: 'p. ej. 123 o S/N' },
   { nombre: 'comuna', etiqueta: 'Comuna', requerido: true, max: 100, col: 'col-md-4' },
   { nombre: 'region', etiqueta: 'Región', max: 100, col: 'col-md-6' },
   { nombre: 'foto', tipo: 'foto' },
 ];
 const CAMPOS_SIMPLES = [
-  { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, max: 100 },
-  { nombre: 'orden', etiqueta: 'Orden (número menor = primero)', tipo: 'number' },
+  { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, max: 45 },
+  { nombre: 'orden', etiqueta: 'Orden (número menor = primero)', tipo: 'number', min: 0, tope: 9999, ayuda: 'Entero entre 0 y 9.999' },
   { nombre: 'visible', etiqueta: 'Visible en el sitio', tipo: 'check' },
 ];
 const CAMPOS_ITEM = [
   { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, max: 100, col: 'col-md-8' },
-  { nombre: 'precio', etiqueta: 'Precio ($)', tipo: 'number', col: 'col-md-4' },
+  { nombre: 'precio', etiqueta: 'Precio ($)', tipo: 'number', col: 'col-md-4', min: 1, tope: 1000000, ayuda: 'Entre $1 y $1.000.000, sin puntos' },
   { nombre: 'descripcion', etiqueta: 'Descripción', tipo: 'textarea', max: 300 },
   { nombre: 'observaciones', etiqueta: 'Observaciones', tipo: 'textarea', max: 300 },
   { nombre: 'tiempo', etiqueta: 'Tiempo de preparación', max: 100, col: 'col-md-6' },
-  { nombre: 'puntuacion', etiqueta: 'Puntuación (0 a 5)', tipo: 'number', col: 'col-md-3' },
-  { nombre: 'orden', etiqueta: 'Orden', tipo: 'number', col: 'col-md-3' },
+  { nombre: 'puntuacion', etiqueta: 'Puntuación (0 a 5)', tipo: 'number', col: 'col-md-3', min: 0, tope: 5 },
+  { nombre: 'orden', etiqueta: 'Orden', tipo: 'number', col: 'col-md-3', min: 0, tope: 9999 },
   { nombre: 'visible', etiqueta: 'Visible en el sitio', tipo: 'check' },
   { nombre: 'destacado', etiqueta: 'Destacado (carrusel de menús destacados)', tipo: 'check' },
   { nombre: 'foto', tipo: 'foto' },
@@ -141,7 +195,7 @@ const CAMPOS_ITEM = [
 const CAMPOS_CUENTA = [
   { nombre: 'nombre', etiqueta: 'Nombre', requerido: true, max: 255 },
   { nombre: 'email', etiqueta: 'Correo', tipo: 'email', requerido: true, max: 255 },
-  { nombre: 'password', etiqueta: 'Contraseña inicial (12 a 128 caracteres)', tipo: 'password', requerido: true, max: 128, minimo: 12 },
+  { nombre: 'password', etiqueta: 'Contraseña inicial', tipo: 'password', requerido: true, max: 128, minimo: 12, ayuda: 'Entre 12 y 128 caracteres' },
 ];
 
 // ------------------------------------------------------------------ pantallas
@@ -367,7 +421,8 @@ function Login({ alEntrar }) {
   const entrar = (e) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    api('POST', '/admin/login', { email: f.get('email'), password: f.get('password') }).then((r) => {
+    // se pide la sesión justo antes: tras "Cerrar sesión" (o si la sesión venció) el token CSRF guardado ya no corresponde
+    cargarSesion().then(() => api('POST', '/admin/login', { email: f.get('email'), password: f.get('password') })).then((r) => {
       fijarCsrf(r.csrfToken); // la sesión se renueva al entrar: token CSRF nuevo
       alEntrar(r.usuario);
     }).catch((err) => setError(err.message));
@@ -432,7 +487,7 @@ export function Admin() {
     if (e.status === 401) setUsuario(null); // sesión vencida o cuenta desactivada: vuelve al login
     else setNav((p) => ({ ...p, aviso: { tipo: 'danger', texto: e.message } }));
   }, []);
-  const salir = () => api('POST', '/admin/logout').catch(() => {}).finally(() => { setUsuario(null); window.location.hash = '#/'; });
+  const salir = () => api('POST', '/admin/logout').catch(() => {}).finally(() => { fijarCsrf(null); setUsuario(null); window.location.hash = '#/'; });
 
   if (errorSesion) return <PantallaError estado={errorSesion.status || 500} mensaje={errorSesion.message} />;
   if (usuario === undefined) return null;
