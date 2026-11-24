@@ -39,16 +39,9 @@ cmd_up() {
     --parameter-overrides "AccesoCidr=${ip}" "InstanceType=${PNK_JENKINS_TIPO:-t3.medium}" "Rama=${PNK_JENKINS_RAMA:-develop}" \
     --tags proyecto=cartapnk componente=jenkins || error 1 "No se pudo crear la pila (revise los eventos en CloudFormation)"
 
-  local url; url="$(salida JenkinsUrl)"
-  echo "==> Esperando a que Jenkins responda en ${url} (la primera vez ~5 min: instala Docker y construye la imagen)"
-  for _ in $(seq 1 60); do
-    if curl -fsS -o /dev/null --max-time 5 "${url}login"; then
-      echo "Listo: ${url}  ·  usuario: admin  ·  contraseña: ./scripts/jenkins.sh clave"
-      return 0
-    fi
-    sleep 10
-  done
-  echo "Jenkins aún no responde desde aquí (si su IP no es ${ip}, el Security Group lo bloquea). Pruebe en el navegador: ${url}"
+  # (no se espera aquí: CloudShell no está en la red autorizada, así que no podría abrir Jenkins)
+  echo "Listo. En ~5-8 min (instala Docker, construye la imagen y arranca) abra en su navegador: $(salida JenkinsUrl)"
+  echo "Usuario: admin  ·  contraseña: ./scripts/jenkins.sh clave"
 }
 
 case "${1:-}" in
