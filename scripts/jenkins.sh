@@ -56,7 +56,8 @@ case "${1:-}" in
   url) salida JenkinsUrl ;;
   actualizar)
     id="$(salida InstanceId)"
-    cmd="$(aws ssm send-command --instance-ids "${id}" --document-name AWS-RunShellScript \n      --parameters 'commands=["/usr/local/bin/jenkins-actualizar"]' --query Command.CommandId --output text)"
+    cmd="$(aws ssm send-command --instance-ids "${id}" --document-name AWS-RunShellScript \
+      --parameters 'commands=["/usr/local/bin/jenkins-actualizar"]' --query Command.CommandId --output text)"
     aws ssm wait command-executed --command-id "${cmd}" --instance-id "${id}" || error 1 "Falló la actualización (vea la salida del comando ${cmd} en SSM)"
     echo "Jenkins actualizado: $(salida JenkinsUrl)" ;;
   clave) aws ssm get-parameter --name "${PREFIJO}/admin" --with-decryption --query Parameter.Value --output text ;;
