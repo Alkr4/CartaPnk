@@ -133,10 +133,38 @@ function Cartas({ lista, alSeleccionar }) {
   );
 }
 
-function Comentarios({ lista }) {
+const esPanel = (sesion) => ['admin', 'superadmin'].includes(sesion?.usuario?.rol);
+
+/** Formulario para comentar: sólo se muestra con sesión del panel (la API lo exige igual: POST sin sesión -> 401). */
+function NuevoComentario({ restauranteId, alPublicar }) {
+  const [error, setError] = useState(null);
+  const [enviando, setEnviando] = useState(false);
+  const publicar = (e) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    setEnviando(true);
+    api('POST', '/restaurantes/' + encodeURIComponent(restauranteId) + '/comentarios', { comentario: new FormData(form).get('comentario') })
+      .then(() => { form.reset(); setError(null); return alPublicar(); })
+      .catch((err) => setError(err.message))
+      .finally(() => setEnviando(false));
+  };
+  return (
+    <form className="mb-4" onSubmit={publicar}>
+      <label className="form-label" htmlFor="nuevo-comentario"><b>Escribe un comentario</b></label>
+      <textarea className={'form-control' + (error ? ' is-invalid' : '')} id="nuevo-comentario" name="comentario" rows={3}
+        maxLength={1000} required aria-invalid={error ? true : undefined} />
+      {error && <div className="invalid-feedback">{error}</div>}
+      <button className="button mt-2" type="submit" disabled={enviando}>Publicar</button>
+    </form>
+  );
+}
+
+function Comentarios({ lista, formulario }) {
   return (
     <section><div className="container contendor"><div className="container"><div className="row"><div className="col-lg-12">
       <div className="section-intro"><h4 className="intro-title">Comentarios</h4></div><br />
+      {formulario}
+      {lista.length === 0 && <p className="text-center">Aún no hay comentarios.</p>}
       {lista.map((c, i) => (
         <div key={i}><div className="card bg-light"><div className="card-body"><b>{c.usuario}</b><br /><Multilinea texto={c.comentario} /></div></div><br /></div>
       ))}
@@ -170,7 +198,7 @@ function Aviso({ mensaje, alCerrar }) {
 }
 
 function FilaAdmin({ sesion }) {
-  if (!sesion?.usuario || !['admin', 'superadmin'].includes(sesion.usuario.rol)) return null;
+  if (!esPanel(sesion)) return null;
   return (
     <nav className="navbar navbar-light bg-light">
       <span className="ms-2">Sesión de administrador: <b>{sesion.usuario.nombre}</b> · <a href="/admin">Ir al panel</a></span>
@@ -198,7 +226,7 @@ export function Carta() {
   useEffect(() => { cargar().then(setEstado); }, []);
   useTitulo(estado?.d?.restaurante.nombre);
 
-  if (!estado) return null;
+  if (!estado) return <p className="text-center my-5">Cargando…</p>;
   if (estado.vacio) return <SinRestaurantes />;
   if (estado.error) return <PantallaError estado={estado.error.status || 500} mensaje={estado.error.message} />;
 
@@ -212,7 +240,8 @@ export function Carta() {
       <Encabezado r={d.restaurante} />
       <Destacados lista={d.destacados} alSeleccionar={seleccionar} />
       <Cartas lista={d.cartas} alSeleccionar={seleccionar} />
-      <Comentarios lista={d.comentarios} />
+      <Comentarios lista={d.comentarios}
+        formulario={esPanel(sesion) && <NuevoComentario restauranteId={d.restaurante.id} alPublicar={() => cargar().then(setEstado)} />} />
       <Pie />
       {aviso && <Aviso mensaje={aviso} alCerrar={() => setAviso(null)} />}
     </>

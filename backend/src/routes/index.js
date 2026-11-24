@@ -6,7 +6,7 @@ const auth = require('../controllers/auth.controller');
 const carta = require('../controllers/carta.controller');
 const carrito = require('../controllers/carrito.controller');
 const admin = require('./admin');
-const { sinCacheNiIndexar } = require('../middlewares/auth');
+const { sinCacheNiIndexar, requiereAdmin } = require('../middlewares/auth');
 
 /** API JSON, montada en /api. El frontend (sitio estático) es quien dibuja las páginas. */
 const router = express.Router();
@@ -25,6 +25,8 @@ router.get('/version', (req, res) => {
 // Carta digital (público: no hay login para los clientes)
 router.get('/restaurantes/primero', carta.primero);
 router.get('/restaurantes/:id', carta.ver);
+// Comentarios: sólo con sesión del panel (dueño o superadmin); los clientes no tienen cuenta
+router.post('/restaurantes/:id/comentarios', requiereAdmin, carta.comentar);
 
 // Carrito (sesión de servidor)
 router.get('/carrito', carrito.ver);

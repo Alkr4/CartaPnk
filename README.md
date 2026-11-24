@@ -23,7 +23,7 @@ La API **no publica puertos**: sólo Nginx puede alcanzarla, por la red interna 
 | Base de datos | PostgreSQL 17 (`pg`, consultas parametrizadas) |
 | Sesión | `express-session` guardada en PostgreSQL (`connect-pg-simple`) |
 | Seguridad | `helmet` · CSP en Nginx y en la API · CSRF propio · `bcryptjs` · `express-rate-limit` · roles |
-| Calidad | Backend: Jest + Supertest (136 pruebas) · ESLint + `eslint-plugin-security` · Frontend: Vitest + Testing Library + jsdom (20 pruebas) · ESLint con reglas anti-XSS y `react-hooks` |
+| Calidad | Backend: Jest + Supertest (136 pruebas) · ESLint + `eslint-plugin-security` · Frontend: Vitest + Testing Library + jsdom (22 pruebas) · ESLint con reglas anti-XSS y `react-hooks` |
 | Contenedores | Docker multi-etapa · Docker Compose (dev / QA / prod) |
 
 ## Estructura del repositorio
@@ -75,6 +75,7 @@ React escapa todo dato que llega de la API: un nombre o comentario con `<script>
 |---|---|
 | `GET /api/sesion` | Estado de la sesión y token CSRF |
 | `GET /api/restaurantes/primero` · `GET /api/restaurantes/:id` | Carta completa (restaurante, destacados, cartas, comentarios) |
+| `POST /api/restaurantes/:id/comentarios` | Publicar un comentario (sólo con sesión del panel; autor = usuario de la sesión) |
 | `GET /api/carrito` · `POST /api/carrito/items` · `DELETE /api/carrito/items/:posicion` · `DELETE /api/carrito` | Carrito (sesión de servidor) |
 | `GET /media/…` · `GET /salud` | Imágenes subidas · salud (balanceador/Docker) |
 

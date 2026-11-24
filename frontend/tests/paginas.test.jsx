@@ -158,6 +158,44 @@ test('el administrador (dueño o superadmin) ve "Ir al panel"; el cliente no ve 
   expect(container.textContent).not.toContain('panel');
 });
 
+test('con sesión del panel se puede comentar (POST con CSRF y la carta se recarga); el cliente no ve el formulario', async () => {
+  irA('/restaurantes/1');
+  let comentarios = [];
+  const llamadas = simularApi((m, ruta) => {
+    if (ruta === '/api/sesion') return { cuerpo: { usuario: { nombre: 'Dueño', rol: 'admin' }, csrfToken: 'tk' } };
+    if (m === 'POST') { comentarios = [{ usuario: 'Dueño', comentario: 'Excelente' }]; return { estado: 201, cuerpo: { id: 1 } }; }
+    return { cuerpo: { ...datosCarta, comentarios } };
+  });
+  render(<Carta />);
+  await screen.findByText('Aún no hay comentarios.');
+  fireEvent.change(screen.getByLabelText('Escribe un comentario'), { target: { value: 'Excelente' } });
+  fireEvent.click(screen.getByText('Publicar'));
+  await screen.findByText('Excelente', { selector: 'span' });
+  const post = llamadas.find((l) => l.metodo === 'POST');
+  expect(post.ruta).toBe('/api/restaurantes/1/comentarios');
+  expect(post.cabeceras['X-CSRF-Token']).toBe('tk');
+  expect(JSON.parse(post.cuerpo)).toEqual({ comentario: 'Excelente' });
+  cleanup();
+
+  simularApi((m, ruta) => ({ cuerpo: ruta === '/api/sesion' ? sinSesion : datosCarta }));
+  const { container } = render(<Carta />);
+  await waitFor(() => expect(container.querySelector('.food-card')).not.toBeNull());
+  expect(screen.queryByText('Publicar')).toBeNull();
+});
+
+test('un error al comentar (p. ej. 422) se muestra junto al campo', async () => {
+  irA('/restaurantes/1');
+  simularApi((m, ruta) => {
+    if (ruta === '/api/sesion') return { cuerpo: { usuario: { nombre: 'S', rol: 'superadmin' }, csrfToken: 'tk' } };
+    if (m === 'POST') return { estado: 422, cuerpo: { error: 'El comentario debe tener entre 1 y 1000 caracteres' } };
+    return { cuerpo: datosCarta };
+  });
+  render(<Carta />);
+  fireEvent.change(await screen.findByLabelText('Escribe un comentario'), { target: { value: ' ' } });
+  fireEvent.click(screen.getByText('Publicar'));
+  await screen.findByText('El comentario debe tener entre 1 y 1000 caracteres');
+});
+
 // ---------------------------------------------------------------- carrito
 test('el carrito lista los productos y permite quitar uno y vaciar (con CSRF)', async () => {
   irA('/carrito?restaurante=1');

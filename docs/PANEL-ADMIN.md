@@ -11,14 +11,14 @@ El sitio público **no muestra ningún login**: los clientes sólo ven la carta.
 | Cartas | crear, editar, ocultar, eliminar (dentro de un restaurante) |
 | Categorías | crear, editar, ocultar, eliminar (dentro de una carta) |
 | Platillos | crear, editar (precio, descripción, puntuación, destacado, imagen), ocultar, eliminar |
-| Comentarios | moderar: eliminar los inapropiados (los clientes ya no pueden publicar; ver nota) |
+| Comentarios | publicar desde la carta (con sesión del panel) y moderar: eliminar los inapropiados |
 
 "Eliminar" es **borrado lógico**: el dato deja de verse en el sitio pero queda en la base. "Ocultar" lo saca del sitio y lo
 mantiene en el panel (marcado como *oculto*).
 
-> **Nota sobre comentarios:** como el cliente no inicia sesión, el sitio público mostró los comentarios existentes en modo lectura y
-> el formulario para publicar se retiró. Si el profesor pide que los clientes comenten, habría que añadir comentarios anónimos con
-> moderación previa (decisión pendiente).
+> **Nota sobre comentarios:** el cliente no tiene cuenta, así que sólo los usuarios con sesión del panel (dueño o superadmin)
+> ven en la carta el formulario "Escribe un comentario". La API lo exige igual (`POST /api/restaurantes/:id/comentarios`:
+> sesión del panel + token CSRF; el autor sale de la sesión, nunca del cuerpo; texto de 1 a 1000 caracteres; queda en la auditoría).
 
 ## Primer administrador
 
