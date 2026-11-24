@@ -46,7 +46,8 @@ cmd_up() {
 
 case "${1:-}" in
   up) shift; cmd_up "$@" ;;
-  url) salida JenkinsUrl ;;
+  url) # la IP pública cambia cada vez que el laboratorio detiene y vuelve a encender la instancia: se consulta la actual
+    echo "http://$(aws ec2 describe-instances --instance-ids "$(salida InstanceId)" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text):8080/" ;;
   actualizar)
     id="$(salida InstanceId)"
     cmd="$(aws ssm send-command --instance-ids "${id}" --document-name AWS-RunShellScript \
