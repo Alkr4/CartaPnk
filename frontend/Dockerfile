@@ -11,7 +11,12 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+# Rama "stable" de Nginx (recibe parches) + paquetes de Alpine actualizados al construir: Trivy bloqueaba la 1.27 por CVE
+# corregidos en libxml2, openssl, expat y libpng. El pipeline vuelve a escanear cada imagen nueva.
+FROM nginxinc/nginx-unprivileged:stable-alpine
+USER root
+RUN apk upgrade --no-cache
+USER 101
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY nginx/proxy.inc /etc/nginx/conf.d/proxy.inc
 COPY nginx/seguridad.inc /etc/nginx/conf.d/seguridad.inc
