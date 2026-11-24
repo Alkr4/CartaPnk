@@ -68,20 +68,29 @@ Resources:
             --query Parameter.Value --output text | base64 -d > /opt/jenkins-secretos/despliegue.tar.gz
           chown 1000:1000 /opt/jenkins-secretos/* && chmod 400 /opt/jenkins-secretos/*
 
-          # imagen de Jenkins desde el repositorio (plugins + configuración como código)
           git clone --depth 1 -b "${Rama}" "${RepoUrl}" /opt/cartapnk
-          docker build -t cartapnk-jenkins /opt/cartapnk/jenkins
-
-          # /var/jenkins_home se monta en la MISMA ruta: los contenedores que lanza el pipeline (por el socket) ven el workspace
           install -d -o 1000 -g 1000 /var/jenkins_home
+
+          # jenkins-actualizar: trae la configuración del repositorio, reconstruye la imagen y recrea el contenedor
+          # (se usa al arrancar y cada vez que cambie jenkins/: scripts/jenkins.sh actualizar)
+          cat > /usr/local/bin/jenkins-actualizar <<'EOF'
+          #!/bin/bash
+          set -euo pipefail
+          git -C /opt/cartapnk pull --ff-only
+          docker build -t cartapnk-jenkins /opt/cartapnk/jenkins
           TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
           IP=$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+          docker rm -f jenkins 2>/dev/null || true
+          # /var/jenkins_home se monta en la MISMA ruta: los contenedores que lanza el pipeline (por el socket) ven el workspace
           docker run -d --name jenkins --restart always -p 8080:8080 \
             -v /var/jenkins_home:/var/jenkins_home \
             -v /var/run/docker.sock:/var/run/docker.sock --group-add "$(stat -c %g /var/run/docker.sock)" \
             -v /opt/jenkins-secretos:/run/secrets/pnk:ro \
             -e JENKINS_URL="http://$IP:8080/" -e REPO_URL="${RepoUrl}" -e RAMA="${Rama}" -e AWS_REGION=${AWS::Region} \
             cartapnk-jenkins
+          EOF
+          chmod 755 /usr/local/bin/jenkins-actualizar
+          /usr/local/bin/jenkins-actualizar
 
 Outputs:
   JenkinsUrl:

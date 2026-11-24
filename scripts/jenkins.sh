@@ -5,6 +5,7 @@
 #   ./scripts/jenkins.sh up <su-ip>[/32]   crea/actualiza Jenkins; sólo esa IP puede abrir la interfaz (puerto 8080)
 #   ./scripts/jenkins.sh url               dirección de Jenkins
 #   ./scripts/jenkins.sh clave             contraseña del usuario admin
+#   ./scripts/jenkins.sh actualizar        aplica cambios de jenkins/ (plugins, casc.yaml) sin recrear el servidor
 #   ./scripts/jenkins.sh down              destruye el servidor y borra sus secretos de SSM
 #
 # Requiere la carpeta .despliegue/ del despliegue (contraseñas de la pila y certificado): se sube cifrada a SSM Parameter
@@ -53,6 +54,11 @@ cmd_up() {
 case "${1:-}" in
   up) shift; cmd_up "$@" ;;
   url) salida JenkinsUrl ;;
+  actualizar)
+    id="$(salida InstanceId)"
+    cmd="$(aws ssm send-command --instance-ids "${id}" --document-name AWS-RunShellScript \n      --parameters 'commands=["/usr/local/bin/jenkins-actualizar"]' --query Command.CommandId --output text)"
+    aws ssm wait command-executed --command-id "${cmd}" --instance-id "${id}" || error 1 "Falló la actualización (vea la salida del comando ${cmd} en SSM)"
+    echo "Jenkins actualizado: $(salida JenkinsUrl)" ;;
   clave) aws ssm get-parameter --name "${PREFIJO}/admin" --with-decryption --query Parameter.Value --output text ;;
   down)
     aws cloudformation delete-stack --stack-name "${STACK}"
