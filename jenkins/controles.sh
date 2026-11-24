@@ -88,7 +88,7 @@ trivy() {
   for img in "${IMG_BACK}" "${IMG_FRONT}"; do
     n=$((n + 1))
     paso "Trivy: ${img} (HIGH/CRITICAL con parche disponible)"
-    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "${REPORTES}":/reportes "${TRIVY_IMG}" image \
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v pnk-trivy-cache:/root/.cache/trivy -v "${REPORTES}":/reportes "${TRIVY_IMG}" image \
       --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --format sarif --output "/reportes/trivy-${n}.sarif" "${img}"
   done
 }
