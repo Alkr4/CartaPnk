@@ -1,10 +1,13 @@
 // Carta digital: pide los datos a la API (GET /api/restaurantes/:id) y dibuja la página con React.
 import { useEffect, useState } from 'react';
-import { api, Icono, montar, moneda, Multilinea, PantallaError, Pie, rutaInterna, useTitulo } from './comun.jsx';
+import { api, cargarSesion, Icono, montar, moneda, Multilinea, PantallaError, Pie, rutaInterna, useTitulo } from './comun.jsx';
 
 /** Datos de la página: { vacio } si aún no hay restaurantes, { d, sesion } o { error }. */
 async function cargar() {
   try {
+    // La sesión va PRIMERO y sola: crea la cookie y el token CSRF de una vez. Si se pidiera en paralelo con la carta, cada
+    // petición sin cookie crearía su propia sesión y el token guardado podría no corresponder a la cookie final (CSRF inválido).
+    const sesion = await cargarSesion().catch(() => null);
     let id = window.location.pathname.match(/^\/restaurantes\/(\d+)\/?$/)?.[1];
     if (!id) {
       try {
@@ -14,7 +17,7 @@ async function cargar() {
         throw e;
       }
     }
-    const [d, sesion] = await Promise.all([api('GET', '/restaurantes/' + id), api('GET', '/sesion').catch(() => null)]);
+    const d = await api('GET', '/restaurantes/' + id);
     return { d, sesion };
   } catch (error) {
     return { error };

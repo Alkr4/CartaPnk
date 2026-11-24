@@ -123,7 +123,7 @@ test('en "/" pide primero el id del restaurante', async () => {
   });
   const { container } = render(<Carta />);
   await waitFor(() => expect(container.querySelector('.food-card')).not.toBeNull());
-  expect(llamadas[0].ruta).toBe('/api/restaurantes/primero');
+  expect(llamadas.map((l) => l.ruta).slice(0, 3)).toEqual(['/api/sesion', '/api/restaurantes/primero', '/api/restaurantes/1']);
 });
 
 test('un 404 de la API muestra la pantalla de error del sitio', async () => {
