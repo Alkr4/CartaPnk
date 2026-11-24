@@ -92,9 +92,17 @@ Resources:
           chmod 755 /usr/local/bin/jenkins-actualizar
           /usr/local/bin/jenkins-actualizar
 
+  # IP pública fija: no cambia cuando el laboratorio detiene y vuelve a encender la instancia
+  JenkinsIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref JenkinsInstance
+      Tags: [{ Key: Name, Value: cartapnk-jenkins }]
+
 Outputs:
   JenkinsUrl:
     Description: Interfaz web de Jenkins (usuario admin; contraseña con "scripts/jenkins.sh clave")
-    Value: !Sub "http://${JenkinsInstance.PublicIp}:8080/"
+    Value: !Sub "http://${JenkinsIp}:8080/"
   InstanceId:
     Value: !Ref JenkinsInstance
