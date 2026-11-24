@@ -50,7 +50,8 @@ describe('API sin login para los clientes', () => {
     expect(res.body.csrfToken).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  test.each(['/api/auth/login', '/api/restaurantes/1/comentarios'])('el endpoint público %s no existe', async (ruta) => {
+  // (los comentarios sí existen, pero sólo con sesión del panel: ver tests/comentarios.test.js)
+  test.each(['/api/auth/login'])('el endpoint público %s no existe', async (ruta) => {
     const agente = nuevoAgente();
     const token = await tokenCsrf(agente);
     const res = await agente.post(ruta).set('X-CSRF-Token', token).send({ comentario: 'x', email: 'a@b.cl', password: 'x' });
