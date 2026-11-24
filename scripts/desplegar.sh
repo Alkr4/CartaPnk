@@ -378,7 +378,7 @@ usar_ambiente() {
   case "${1:-}" in
     pruebas) STACK="${PNK_STACK:-cartapnk}" ;;
     produccion) STACK="${PNK_STACK_PRODUCCION:-cartapnk-produccion}" ;;
-    *) terminar "${EXIT_PARAMETROS}" "Ambiente inválido: '${1:-}'. Valores permitidos: pruebas, produccion" ;;
+    *) terminar "${EXIT_PARAMETROS}" "Ambiente inválido: '${1:-}'. Valores permitidos: pruebas, produccion. Ejemplo: ./scripts/desplegar.sh publicar pruebas $(git rev-parse --short HEAD)" ;;
   esac
   AMBIENTE="$1"
 }
