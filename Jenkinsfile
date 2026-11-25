@@ -55,7 +55,7 @@ pipeline {
         withCredentials([file(credentialsId: 'pnk-despliegue', variable: 'DESPLIEGUE')]) {
           sh '''
             tar -xzf "$DESPLIEGUE"
-            PNK_REVERTIR_SI_FALLA=1 PNK_DB_MULTIAZ="${PNK_DB_MULTIAZ:-false}" ./scripts/desplegar.sh publicar pruebas "$VERSION"
+            PNK_REVERTIR_SI_FALLA=1 ./scripts/desplegar.sh publicar pruebas "$VERSION"
           '''
         }
       }
