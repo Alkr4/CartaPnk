@@ -63,7 +63,7 @@ Resources:
           # secretos desde SSM Parameter Store (nunca en este user-data): contraseña de admin y .despliegue empaquetado
           install -d -m 700 -o 1000 -g 1000 /opt/jenkins-secretos
           aws ssm get-parameter --region ${AWS::Region} --with-decryption --name "${ParametroSecretos}/admin" \
-            --query Parameter.Value --output text > /opt/jenkins-secretos/admin
+            --query Parameter.Value --output text | tr -d '\n' > /opt/jenkins-secretos/admin   # sin salto de línea: readFile lo incluiría en la contraseña
           aws ssm get-parameter --region ${AWS::Region} --with-decryption --name "${ParametroSecretos}/despliegue" \
             --query Parameter.Value --output text | base64 -d > /opt/jenkins-secretos/despliegue.tar.gz
           chown 1000:1000 /opt/jenkins-secretos/* && chmod 400 /opt/jenkins-secretos/*
