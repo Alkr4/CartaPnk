@@ -20,8 +20,8 @@ echo "APP_PORT=3010" >> env/dev.env      # dev en el 3010 para no chocar con pro
 # DESARROLLO  (código montado como volumen, recarga automática)
 docker compose -p pnk-dev --env-file env/dev.env -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
-# QA  (misma imagen que producción; sólo app + base, sin el contenedor de pruebas)
-docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up -d --build app db
+# QA  (misma imagen que producción; sólo sitio (front + back) + base, sin el contenedor de pruebas)
+docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up -d --build back front db
 
 # PRODUCCIÓN  (si ya está levantada, no hace falta repetir)
 docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f docker-compose.prod.yml up -d --build
@@ -32,7 +32,7 @@ docker compose -p pnk-prod --env-file env/prod.env -f docker-compose.yml -f dock
 ```bash
 for amb in dev qa prod; do
   docker rm -f tunel-$amb 2>/dev/null
-  docker run -d --name tunel-$amb --network pnk-${amb}_default cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://app:3000
+  docker run -d --name tunel-$amb --network pnk-${amb}_default cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://front:8080
 done
 sleep 8
 for amb in dev qa prod; do
@@ -55,12 +55,12 @@ Cada línea imprime la URL pública de ese ambiente. Las direcciones cambian si 
    usuarios demo y con la base de datos sin puertos.
 
 2. **Las tres URLs en el navegador**, cada una con `/salud` al final: responde `{"estado":"ok","ambiente":"development" | "qa" | "production"}`.
-3. **Login con el usuario de laboratorio** (`admin@gmail.com` / `admin01`) en la URL de **dev** y de **QA**: entra.
+3. **Panel de administración con el usuario de laboratorio** (`admin@gmail.com` / `admin01`): abrir `/admin` en la URL de **dev** y de **QA**: entra.
    En **producción** ese usuario **no existe** (sólo el administrador definido en `env/prod.env`).
 4. **Infraestructura como código**: abrir en GitHub `docker-compose.yml` + `docker-compose.dev.yml` / `.qa.yml` / `.prod.yml`
    y las plantillas `env/*.env.example` (los secretos reales no están en el repositorio).
 5. **QA automatizado**: mostrar la salida de `docker compose -p pnk-qa --env-file env/qa.env -f docker-compose.yml -f docker-compose.qa.yml up --build --abort-on-container-exit --exit-code-from pruebas`
-   con `62 passed`, lint sin advertencias y `found 0 vulnerabilities`.
+   con `136 passed`, lint sin advertencias y `found 0 vulnerabilities`.
 6. **Pipeline (4.ª entrega)**: `docs/JENKINS.md` y el `Jenkinsfile`.
 
 ## 4. Diferencias entre ambientes (para el informe)
@@ -74,7 +74,7 @@ Cada línea imprime la URL pública de ese ambiente. Las direcciones cambian si 
 | Cookie `Secure` / HSTS | no | no | sí |
 | Base de datos | puerto 5432 sólo en localhost | sin puertos | sin puertos |
 | Contenedor | sin restricciones | sin restricciones | FS de solo lectura, `cap_drop: ALL`, `no-new-privileges`, límites de memoria y PIDs |
-| Tests | — | lint + 62 pruebas + `npm audit` | — |
+| Tests | — | lint + 136 pruebas + `npm audit` | — |
 | Proyecto Compose | `pnk-dev` | `pnk-qa` | `pnk-prod` (red y volumen propios) |
 
 ## 5. Apagar la demostración

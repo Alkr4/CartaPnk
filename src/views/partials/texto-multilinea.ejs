@@ -1,2 +1,0 @@
-<%# Texto de usuario con saltos de línea: se escapa TODO el contenido y luego se convierten los \n en <br> (equivale a nl2br(h())). -%>
-<%- String(texto).split(/\r\n|\r|\n/).map((linea) => linea.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])).join('<br>\n') %>
