@@ -3,7 +3,8 @@ const Restaurante = require('../models/restaurante.model');
 const Carta = require('../models/carta.model');
 const Item = require('../models/item.model');
 const Comentario = require('../models/comentario.model');
-const { enteroPositivo } = require('../utils/validadores');
+const { enteroPositivo, texto } = require('../utils/validadores');
+const auditoria = require('../utils/auditoria');
 const { urlFoto } = require('../utils/fotos');
 const { error } = require('../middlewares/auth');
 
@@ -39,4 +40,22 @@ async function ver(req, res) {
   });
 }
 
-module.exports = { primero, ver };
+/**
+ * POST /api/restaurantes/:id/comentarios {comentario} — publica un comentario en la carta. Sólo usuarios con sesión del panel
+ * (la ruta exige requiereAdmin; el autor sale de la sesión, nunca del cuerpo). Texto de 1 a 1000 caracteres.
+ */
+async function comentar(req, res) {
+  const id = enteroPositivo(req.params.id);
+  if (!id || !(await Restaurante.buscarPorId(id))) throw noEncontrado();
+  const comentario = texto(req.body?.comentario, 1000);
+  if (!comentario) {
+    const err = error(422, 'El comentario debe tener entre 1 y 1000 caracteres');
+    err.errores = { comentario: err.message };
+    throw err;
+  }
+  const comentarioId = await Comentario.crear({ usuarioId: req.session.usuario.id, restauranteId: id, comentario });
+  auditoria.registrar('comentario_creado', 'exito', { req, usuario: req.session.usuario.id, detalle: `restaurante ${id}, comentario ${comentarioId}` });
+  res.status(201).json({ id: comentarioId });
+}
+
+module.exports = { primero, ver, comentar };

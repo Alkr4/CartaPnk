@@ -11,14 +11,14 @@ El sitio público **no muestra ningún login**: los clientes sólo ven la carta.
 | Cartas | crear, editar, ocultar, eliminar (dentro de un restaurante) |
 | Categorías | crear, editar, ocultar, eliminar (dentro de una carta) |
 | Platillos | crear, editar (precio, descripción, puntuación, destacado, imagen), ocultar, eliminar |
-| Comentarios | moderar: eliminar los inapropiados (los clientes ya no pueden publicar; ver nota) |
+| Comentarios | publicar desde la carta (con sesión del panel) y moderar: eliminar los inapropiados |
 
 "Eliminar" es **borrado lógico**: el dato deja de verse en el sitio pero queda en la base. "Ocultar" lo saca del sitio y lo
 mantiene en el panel (marcado como *oculto*).
 
-> **Nota sobre comentarios:** como el cliente no inicia sesión, el sitio público mostró los comentarios existentes en modo lectura y
-> el formulario para publicar se retiró. Si el profesor pide que los clientes comenten, habría que añadir comentarios anónimos con
-> moderación previa (decisión pendiente).
+> **Nota sobre comentarios:** el cliente no tiene cuenta, así que sólo los usuarios con sesión del panel (dueño o superadmin)
+> ven en la carta el formulario "Escribe un comentario". La API lo exige igual (`POST /api/restaurantes/:id/comentarios`:
+> sesión del panel + token CSRF; el autor sale de la sesión, nunca del cuerpo; texto de 1 a 1000 caracteres; queda en la auditoría).
 
 ## Primer administrador
 
@@ -36,7 +36,7 @@ mantiene en el panel (marcado como *oculto*).
 | **CSRF** en todos los formularios, también los *multipart* | `backend/src/middlewares/csrf.js` |
 | Validación por **lista blanca** de campos (tipo, largo y rango); sin asignación masiva | `backend/src/utils/validacionAdmin.js` |
 | Consultas SQL parametrizadas, ids de la URL validados (404 si no son enteros positivos), transacciones en altas/ediciones compuestas | `backend/src/models/*` |
-| Salida como **texto** en el frontend (nunca `innerHTML` con datos): sin XSS almacenado; CSP `script-src 'self'` | `frontend/public/js/comun.js`, `frontend/nginx/seguridad.inc` |
+| Salida como **texto** en el frontend (React escapa; `dangerouslySetInnerHTML`/`innerHTML` prohibidos por ESLint y pruebas): sin XSS almacenado; CSP `script-src 'self'` | `frontend/src/comun.jsx`, `frontend/eslint.config.js`, `frontend/nginx/seguridad.inc` |
 | Imágenes: tipo real por **firma** (JPG/PNG/WEBP; SVG rechazado), máx. 2 MB, nombre aleatorio, no se ejecutan ni se escriben antes de validar | `backend/src/middlewares/subida.js`, `backend/src/storage/imagen.js` |
 | Entrega de imágenes con `nosniff` y `Content-Security-Policy: sandbox`; sólo claves con el formato exacto (sin *path traversal*) | `backend/src/routes/media.js` |
 | Almacenamiento S3 **privado**, cifrado, sólo HTTPS, credenciales por rol de instancia | `infra/pnk-stack.yaml` |

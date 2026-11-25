@@ -1,0 +1,58 @@
+# Jenkins como código (plugin Configuration as Code). Los secretos NO están aquí: se leen de archivos montados en
+# /run/secrets/pnk (los escribe la instancia EC2 al arrancar, desde AWS SSM Parameter Store; ver infra/jenkins.yaml).
+jenkins:
+  systemMessage: "CartaPnk · CI/CD con controles de seguridad (ver Jenkinsfile y jenkins/controles.sh)"
+  numExecutors: 1
+  mode: NORMAL                                # "agent any" del Jenkinsfile corre en el nodo integrado (EXCLUSIVE lo dejaba esperando)
+  securityRealm:
+    local:
+      allowsSignup: false                       # sin registro de usuarios
+      users:
+        - id: admin
+          name: Administrador
+          password: "${readFile:/run/secrets/pnk/admin}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false                 # sin acceso anónimo
+  # la protección CSRF de Jenkins (crumb) viene activa por defecto y no se puede desactivar
+
+unclassified:
+  location:
+    url: "${JENKINS_URL}"
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          # .despliegue/ (contraseñas de la pila y ARN del certificado) empaquetado: sólo lo usa la etapa "Publicar"
+          - file:
+              scope: GLOBAL
+              id: pnk-despliegue
+              description: "Estado de despliegue de CartaPnk (.despliegue empaquetado)"
+              fileName: despliegue.tar.gz
+              secretBytes: "${readFileBase64:/run/secrets/pnk/despliegue.tar.gz}"
+
+jobs:
+  - script: |
+      pipelineJob('cartapnk') {
+        description('Pipeline de CartaPnk: secretos, SAST, dependencias, pruebas, imágenes, Trivy, ZAP y publicación en AWS.')
+        properties {
+          pipelineTriggers {
+            triggers {
+              pollSCM { scmpoll_spec('H/2 * * * *') }   // revisa la rama cada 2 minutos (no necesita webhook entrante)
+            }
+          }
+        }
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('${REPO_URL}') }   // JCasC reemplaza la variable de entorno al cargar
+                branch('*/${RAMA}')
+              }
+            }
+            scriptPath('Jenkinsfile')
+            lightweight(false)
+          }
+        }
+      }

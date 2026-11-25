@@ -1,10 +1,11 @@
 'use strict';
 const { nuevoAgente, tokenCsrf, adminConToken } = require('./ayudas');
 const { pool, query } = require('../src/db/pool');
+const { validar, ESQUEMAS, rutValido } = require('../src/utils/validacionAdmin');
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
 const RESTAURANTE = {
-  nombre: 'Café de Prueba', rut: '76123456-7', fono: '+56 9 1234 5678', email: 'cafe@prueba.cl',
+  nombre: 'Café de Prueba', rut: '76.123.456-0', fono: '+56 9 1234 5678', email: 'cafe@prueba.cl',
   calle: 'Av. Test', numero: '123', comuna: 'Santiago', region: 'Metropolitana',
 };
 
@@ -40,14 +41,16 @@ describe('panel: control de acceso', () => {
     expect(res.status).toBe(401);
   });
 
-  test('un cliente (rol distinto de admin) no puede usar el panel aunque tenga sesión', async () => {
-    // se simula una sesión con otro rol directamente en la tabla de sesiones
+  test('un cliente (rol sin acceso al panel) no puede usar el panel aunque tenga una sesión creada a mano', async () => {
+    // se fabrica una sesión a nombre de la cuenta "cliente": el servidor consulta el rol REAL en la base de datos en cada petición
     const agente = nuevoAgente();
     await agente.get('/api/sesion');
-    await query(`UPDATE sesiones SET sess = jsonb_set(sess::jsonb, '{usuario}', '{"id": 2, "nombre": "Cliente", "rol": "cliente"}')::json
-                  WHERE sid = (SELECT sid FROM sesiones ORDER BY expire DESC LIMIT 1)`);
+    const { rows: [cliente] } = await query("SELECT id FROM usuarios WHERE rol = 'cliente' LIMIT 1");
+    await query(`UPDATE sesiones SET sess = jsonb_set(sess::jsonb, '{usuario}', $1::jsonb)::json
+                  WHERE sid = (SELECT sid FROM sesiones ORDER BY expire DESC LIMIT 1)`,
+    [JSON.stringify({ id: cliente.id, nombre: 'Cliente', rol: 'admin' })]); // la sesión DICE admin, la base dice cliente
     const res = await agente.get('/api/admin/restaurantes');
-    expect([401, 403]).toContain(res.status);
+    expect(res.status).toBe(403);
   });
 
   test('un DELETE de administrador sin token CSRF se rechaza y no borra nada', async () => {
@@ -157,6 +160,33 @@ describe('panel: validación y subidas hostiles', () => {
     expect(res.body.errores.rut).toContain('El RUT sólo admite');
     expect(res.body.errores.email).toBeDefined();
     expect((await query('SELECT count(*)::int AS n FROM restaurantes')).rows[0].n).toBe(antes);
+  });
+
+  test.each([
+    ['RUT con dígito verificador incorrecto', { rut: '76123456-7' }, 'rut', 'dígito verificador'],
+    ['precio negativo', { precio: '-100' }, 'precio', 'al menos 1'],
+    ['precio cero', { precio: '0' }, 'precio', 'al menos 1'],
+    ['precio exagerado', { precio: '1000001' }, 'precio', 'no puede superar 1000000'],
+    ['precio con decimales', { precio: '10.5' }, 'precio', 'número entero'],
+    ['puntuación fuera de rango', { puntuacion: '6' }, 'puntuacion', 'no puede superar 5'],
+    ['número de calle con símbolos', { numero: '12<b>' }, 'numero', 'sólo admite'],
+  ])('%s -> 422 con el mensaje del campo', async (_caso, cambio, campo, mensaje) => {
+    const { esquema, cuerpo } = campo === 'precio' || campo === 'puntuacion'
+      ? { esquema: ESQUEMAS.item, cuerpo: { nombre: 'Plato', ...cambio } }
+      : { esquema: ESQUEMAS.restaurante, cuerpo: { ...RESTAURANTE, ...cambio } };
+    const r = validar(esquema, cuerpo);
+    expect(r.valido).toBe(false);
+    // eslint-disable-next-line security/detect-object-injection -- `campo` es una constante de la tabla de casos
+    expect(r.errores[campo]).toContain(mensaje);
+  });
+
+  test('el RUT se acepta con o sin puntos y se guarda normalizado; "S/N" es un número válido', () => {
+    expect(rutValido('76.123.456-0')).toBe(true);
+    expect(rutValido('88776655-k')).toBe(true);
+    expect(rutValido('12345678-9')).toBe(false);
+    const r = validar(ESQUEMAS.restaurante, { ...RESTAURANTE, rut: '88.776.655-k', numero: 'S/N' });
+    expect(r.valido).toBe(true);
+    expect(r.valores.rut).toBe('88776655-K');
   });
 
   test('campos que no están en el esquema se ignoran (sin asignación masiva)', async () => {

@@ -25,7 +25,7 @@ function crearApp() {
   app.get('/salud', async (req, res) => {
     try {
       await pool.query('SELECT 1');
-      res.json({ estado: 'ok', ambiente: config.ambiente });
+      res.json({ estado: 'ok', ambiente: config.ambiente, version: config.version });
     } catch {
       res.status(503).json({ estado: 'sin-base-de-datos' });
     }

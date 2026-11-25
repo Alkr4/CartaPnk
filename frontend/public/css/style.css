@@ -3043,3 +3043,31 @@ button.button {
 .footer-area .footer-bottom .footer-social a span {
 	font-size: 14px
 }
+
+/* Menús destacados: fila desplazable con CSS (reemplaza al carrusel jQuery/Owl): 3 por fila, 2 en tablet, 1 en móvil */
+.featured-carousel {
+	display: flex;
+	gap: 30px;
+	overflow-x: auto;
+	scroll-snap-type: x mandatory;
+	padding-bottom: 10px
+}
+
+.featured-carousel > .featured-item {
+	flex: 0 0 calc((100% - 60px) / 3);
+	scroll-snap-align: start
+}
+
+.featured-carousel .card-img {
+	height: auto;
+	aspect-ratio: 350 / 235;
+	object-fit: cover
+}
+
+@media (max-width: 1099px) {
+	.featured-carousel > .featured-item { flex-basis: calc((100% - 30px) / 2) }
+}
+
+@media (max-width: 767px) {
+	.featured-carousel > .featured-item { flex-basis: 100% }
+}

@@ -28,8 +28,10 @@ RUN npm ci --no-audit --no-fund
 # ---------------------------------------------------------------- DESARROLLO
 FROM deps-completas AS desarrollo
 ENV APP_ENV=development
-COPY . .
-RUN chmod +x docker/entrypoint.sh
+COPY --chown=node:node . .
+# también en desarrollo y QA se corre como usuario sin privilegios (Semgrep: dockerfile.security.missing-user)
+RUN chmod +x docker/entrypoint.sh && mkdir -p uploads && chown node:node uploads
+USER node
 EXPOSE 3000
 ENTRYPOINT ["/sbin/tini", "--", "/app/docker/entrypoint.sh"]
 CMD ["npm", "run", "dev"]
@@ -37,7 +39,9 @@ CMD ["npm", "run", "dev"]
 # ---------------------------------------------------------------- PRUEBAS (QA)
 FROM deps-completas AS pruebas
 ENV APP_ENV=test
-COPY . .
+COPY --chown=node:node . .
+RUN mkdir -p uploads reportes && chown node:node uploads reportes
+USER node
 # Falla (código distinto de 0) si el lint, alguna prueba o la auditoría de dependencias fallan.
 CMD ["sh", "-c", "npm run lint && npm test && npm run audit:deps"]
 
@@ -46,6 +50,11 @@ FROM base AS produccion
 ENV NODE_ENV=production \
     APP_ENV=production \
     PORT=3000
+# Versión que identifica a esta imagen (la inyecta el pipeline con --build-arg); se expone en /api/version y /salud
+ARG APP_VERSION=desarrollo
+ARG GIT_COMMIT=desconocido
+ENV APP_VERSION=${APP_VERSION} \
+    GIT_COMMIT=${GIT_COMMIT}
 COPY --from=deps-produccion /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
@@ -56,7 +65,10 @@ RUN mkdir -p db/certs \
  && wget -qO db/certs/rds-global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
  && test -s db/certs/rds-global-bundle.pem
 # /app/uploads: imágenes subidas desde el panel con STORAGE_DRIVER=local (en AWS se usa S3 y no se escribe a disco)
-RUN mkdir -p uploads && chmod +x docker/entrypoint.sh && chown -R node:node /app
+# La imagen de producción no necesita npm (arranca con node): se elimina junto con sus dependencias internas, que Trivy
+# reportaba con CVE (undici, brace-expansion) y que sólo agrandaban la superficie de ataque.
+RUN mkdir -p uploads && chmod +x docker/entrypoint.sh && chown -R node:node /app \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

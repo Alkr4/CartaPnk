@@ -2,6 +2,7 @@
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const config = require('../config');
 const { AlmacenLimitePostgres } = require('./almacenLimitePostgres');
+const auditoria = require('../utils/auditoria');
 
 /** Límite general por IP contra abuso/DoS básico. */
 const limiteGlobal = () => rateLimit({
@@ -28,6 +29,7 @@ const limiteLogin = () => rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => `${ipKeyGenerator(req.ip)}|${String(req.body?.email ?? '').toLowerCase().slice(0, 255)}`,
   handler: (req, res) => {
+    auditoria.registrar('login', 'bloqueado', { req, usuario: req.body?.email, detalle: 'límite de intentos fallidos' });
     res.set('Retry-After', String(Math.ceil(config.seguridad.loginVentanaMs / 1000)));
     res.status(429).json({ error: 'Demasiados intentos fallidos. Inténtalo nuevamente en unos minutos.' });
   },

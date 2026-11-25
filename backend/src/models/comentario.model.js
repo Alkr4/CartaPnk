@@ -13,6 +13,15 @@ async function listarPorRestaurante(restauranteId) {
   return rows;
 }
 
+/** Publica un comentario. El texto se guarda tal cual (consulta parametrizada); el frontend lo muestra siempre como texto. */
+async function crear({ usuarioId, restauranteId, comentario }) {
+  const { rows } = await query(
+    "INSERT INTO comentarios (usuario_id, restaurante_id, comentario) VALUES ($1, $2, $3) RETURNING id",
+    [usuarioId, restauranteId, comentario],
+  );
+  return rows[0].id;
+}
+
 // ------------------------------------------------------------------ administración (moderación)
 
 async function listarAdmin(restauranteId) {
@@ -37,4 +46,4 @@ async function eliminar(id) {
   return rowCount > 0;
 }
 
-module.exports = { listarPorRestaurante, listarAdmin, obtener, eliminar };
+module.exports = { listarPorRestaurante, crear, listarAdmin, obtener, eliminar };

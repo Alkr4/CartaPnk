@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CartaPnk - servidor Jenkins (EC2 t3.medium en la VPC por defecto) con Docker. Jenkins corre en un contenedor construido
+  desde jenkins/ del repositorio (plugins y configuración como código). Lo crea y destruye scripts/jenkins.sh.
+
+Parameters:
+  AccesoCidr:
+    Type: String
+    AllowedPattern: '^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$'
+    ConstraintDescription: Una red en formato CIDR, p. ej. 200.1.2.3/32
+    Description: Única red desde la que se puede abrir Jenkins (puerto 8080). Normalmente su IP pública con /32.
+  InstanceType:
+    Type: String
+    Default: t3.medium
+  InstanceProfileName:
+    Type: String
+    Default: LabInstanceProfile
+    Description: Perfil de instancia con permisos para ECR, CloudFormation, EC2, RDS, S3 y SSM (en AWS Academy, LabInstanceProfile)
+  RepoUrl:
+    Type: String
+    Default: https://github.com/Alkr4/CartaPnk.git
+  Rama:
+    Type: String
+    Default: develop
+    Description: Rama que Jenkins vigila y publica en el ambiente "pruebas"
+  ParametroSecretos:
+    Type: String
+    Default: /cartapnk/jenkins
+    Description: Prefijo en SSM Parameter Store con la contraseña de admin y el estado de despliegue (SecureString)
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  JenkinsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Jenkins de CartaPnk - interfaz web solo desde la red autorizada
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 8080, ToPort: 8080, CidrIp: !Ref AccesoCidr, Description: Interfaz web de Jenkins }
+      Tags: [{ Key: Name, Value: cartapnk-jenkins }]
+
+  JenkinsInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfileName
+      SecurityGroupIds: [!GetAtt JenkinsSecurityGroup.GroupId]
+      # IMDSv2 obligatorio; 2 saltos para que los contenedores (Jenkins, AWS CLI) obtengan las credenciales del rol
+      MetadataOptions: { HttpTokens: required, HttpPutResponseHopLimit: 2, HttpEndpoint: enabled }
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: 40, VolumeType: gp3, Encrypted: true, DeleteOnTermination: true }
+      Tags: [{ Key: Name, Value: cartapnk-jenkins }]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          dnf install -y docker git
+          systemctl enable --now docker
+
+          # secretos desde SSM Parameter Store (nunca en este user-data): contraseña de admin y .despliegue empaquetado
+          install -d -m 700 -o 1000 -g 1000 /opt/jenkins-secretos
+          aws ssm get-parameter --region ${AWS::Region} --with-decryption --name "${ParametroSecretos}/admin" \
+            --query Parameter.Value --output text | tr -d '\n' > /opt/jenkins-secretos/admin   # sin salto de línea: readFile lo incluiría en la contraseña
+          aws ssm get-parameter --region ${AWS::Region} --with-decryption --name "${ParametroSecretos}/despliegue" \
+            --query Parameter.Value --output text | base64 -d > /opt/jenkins-secretos/despliegue.tar.gz
+          chown 1000:1000 /opt/jenkins-secretos/* && chmod 400 /opt/jenkins-secretos/*
+
+          git clone --depth 1 -b "${Rama}" "${RepoUrl}" /opt/cartapnk
+          install -d -o 1000 -g 1000 /var/jenkins_home
+
+          # jenkins-actualizar: trae la configuración del repositorio, reconstruye la imagen y recrea el contenedor
+          # (se usa al arrancar y cada vez que cambie jenkins/: scripts/jenkins.sh actualizar)
+          cat > /usr/local/bin/jenkins-actualizar <<'EOF'
+          #!/bin/bash
+          set -euo pipefail
+          git -C /opt/cartapnk pull --ff-only
+          docker build -t cartapnk-jenkins /opt/cartapnk/jenkins
+          TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+          IP=$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+          docker rm -f jenkins 2>/dev/null || true
+          # /var/jenkins_home se monta en la MISMA ruta: los contenedores que lanza el pipeline (por el socket) ven el workspace
+          docker run -d --name jenkins --restart always -p 8080:8080 \
+            -v /var/jenkins_home:/var/jenkins_home \
+            -v /var/run/docker.sock:/var/run/docker.sock --group-add "$(stat -c %g /var/run/docker.sock)" \
+            -v /opt/jenkins-secretos:/run/secrets/pnk:ro \
+            -e JENKINS_URL="http://$IP:8080/" -e REPO_URL="${RepoUrl}" -e RAMA="${Rama}" -e AWS_REGION=${AWS::Region} \
+            cartapnk-jenkins
+          EOF
+          chmod 755 /usr/local/bin/jenkins-actualizar
+          /usr/local/bin/jenkins-actualizar
+
+  # IP pública fija: no cambia cuando el laboratorio detiene y vuelve a encender la instancia
+  JenkinsIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref JenkinsInstance
+      Tags: [{ Key: Name, Value: cartapnk-jenkins }]
+
+Outputs:
+  JenkinsUrl:
+    Description: Interfaz web de Jenkins (usuario admin; contraseña con "scripts/jenkins.sh clave")
+    Value: !Sub "http://${JenkinsIp}:8080/"
+  InstanceId:
+    Value: !Ref JenkinsInstance

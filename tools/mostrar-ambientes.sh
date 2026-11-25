@@ -35,8 +35,8 @@ for par in "dev:${DEV_PORT}" "qa:${QA_PORT}" "prod:${PROD_PORT}"; do
   fi
   app_env="$(printf '%s' "${salud}" | sed -n 's/.*"ambiente":"\([a-z]*\)".*/\1/p')"
 
-  # Se simula una petición llegada por HTTPS a través de un proxy (como hace Cloudflare) para ver HSTS y la cookie Secure.
-  cab="$(curl -sI --max-time 5 -H 'X-Forwarded-Proto: https' "${base}/restaurantes/1")"
+  # Se simula una petición HTTPS que llega a través de un proxy (como hace Cloudflare) a la API (vía Nginx) para ver HSTS y la cookie Secure.
+  cab="$(curl -sI --max-time 5 -H 'X-Forwarded-Proto: https' "${base}/api/sesion")"
   if printf '%s' "${cab}" | grep -qi '^strict-transport-security'; then hsts="si"; else hsts="no"; fi
   if printf '%s' "${cab}" | grep -i '^set-cookie' | grep -qi 'secure'; then cookie="Secure"; else cookie="sin Secure"; fi
 
