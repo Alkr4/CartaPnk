@@ -5,6 +5,7 @@
 #   ./scripts/jenkins.sh up <su-ip>[/32]   crea/actualiza Jenkins; sólo esa IP puede abrir la interfaz (puerto 8080)
 #   ./scripts/jenkins.sh url               dirección de Jenkins
 #   ./scripts/jenkins.sh clave             contraseña del usuario admin
+#   ./scripts/jenkins.sh ip [nueva-ip]     cambia la IP autorizada (sin argumento: la IP actual de este equipo)
 #   ./scripts/jenkins.sh actualizar        aplica cambios de jenkins/ (plugins, casc.yaml) sin recrear el servidor
 #   ./scripts/jenkins.sh down              destruye el servidor y borra sus secretos de SSM
 #
@@ -53,6 +54,17 @@ case "${1:-}" in
       --parameters 'commands=["/usr/local/bin/jenkins-actualizar"]' --query Command.CommandId --output text)"
     aws ssm wait command-executed --command-id "${cmd}" --instance-id "${id}" || error 1 "Falló la actualización (vea la salida del comando ${cmd} en SSM)"
     echo "Jenkins actualizado: $(salida JenkinsUrl)" ;;
+  ip) # cambia la única IP autorizada (p. ej. al pasar de la casa a la universidad); sin argumento usa la IP actual
+    nueva="${2:-$(curl -fsS https://checkip.amazonaws.com)}"; nueva="${nueva//[$'\r\n ']/}"
+    [[ "${nueva}" == */* ]] || nueva="${nueva}/32"
+    params=()
+    for k in $(aws cloudformation describe-stacks --stack-name "${STACK}" --query 'Stacks[0].Parameters[].ParameterKey' --output text); do
+      [ "${k}" = AccesoCidr ] && params+=("ParameterKey=AccesoCidr,ParameterValue=${nueva}") || params+=("ParameterKey=${k},UsePreviousValue=true")
+    done
+    aws cloudformation update-stack --stack-name "${STACK}" --use-previous-template --capabilities CAPABILITY_IAM --parameters "${params[@]}" >/dev/null \
+      || error 1 "No se pudo actualizar (¿ya estaba autorizada ${nueva}?)"
+    aws cloudformation wait stack-update-complete --stack-name "${STACK}"
+    echo "Jenkins ahora sólo acepta ${nueva}: $(salida JenkinsUrl)" ;;
   clave) aws ssm get-parameter --name "${PREFIJO}/admin" --with-decryption --query Parameter.Value --output text ;;
   down)
     aws cloudformation delete-stack --stack-name "${STACK}"
