@@ -66,7 +66,7 @@ test('la carta se dibuja con los datos de la API, precios del sitio original y p
   simularApi((m, ruta) => ({ cuerpo: ruta === '/api/sesion' ? sinSesion : datosCarta }));
   const { container } = render(<Carta />);
   await waitFor(() => expect(container.querySelectorAll('.food-card')).toHaveLength(2));
-  expect(document.title).toMatch(/^Restobar/);
+  await waitFor(() => expect(document.title).toMatch(/^Restobar/)); // el título se fija en un efecto (puede llegar después del render)
   for (const t of ['Menús Destacados', 'Productos Seleccionados', '$ 12.500', '$ 1.234.567', 'No Información para Mostrar']) {
     expect(container.textContent).toContain(t);
   }
