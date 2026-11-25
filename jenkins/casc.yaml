@@ -3,7 +3,7 @@
 jenkins:
   systemMessage: "CartaPnk · CI/CD con controles de seguridad (ver Jenkinsfile y jenkins/controles.sh)"
   numExecutors: 1
-  mode: EXCLUSIVE
+  mode: NORMAL                                # "agent any" del Jenkinsfile corre en el nodo integrado (EXCLUSIVE lo dejaba esperando)
   securityRealm:
     local:
       allowsSignup: false                       # sin registro de usuarios
