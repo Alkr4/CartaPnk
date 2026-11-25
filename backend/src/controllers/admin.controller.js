@@ -111,7 +111,6 @@ async function detalleRestaurante(req, res) {
 
 async function editarRestaurante(req, res) {
   const id = idDe(req.params.id);
-  await permitir(req, id);
   const restaurante = existe(await Restaurante.obtenerAdmin(id));
   await Restaurante.actualizar(id, datosValidos(ESQUEMAS.restaurante, req.body));
   const advertencia = await fotoSegura(req, 'restaurantes', id, restaurante.foto, Restaurante);
